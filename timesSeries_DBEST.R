@@ -3,6 +3,8 @@ library(DBEST)
 library(zoo)
 TS_DF = read.csv("timeSeriesDF.csv",header = TRUE)
 
+print("hello world!")
+
 ## creating the dates for the time series index
 startYear = colnames(TS_DF)[2]
 startYear = substr(startYear, 2,5)
