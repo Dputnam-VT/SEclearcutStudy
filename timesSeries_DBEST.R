@@ -1,9 +1,7 @@
 setwd("C:/R_workspace")
 library(DBEST)
 library(zoo)
-TS_DF = read.csv("timeSeriesDF.csv",header = TRUE)
-
-print("hello world!")
+TS_DF = read.csv("timeSeriesDF500.csv",header = TRUE)
 
 ## creating the dates for the time series index
 startYear = colnames(TS_DF)[2]
@@ -51,7 +49,7 @@ plot_DBEST = function(DBEST_object,index) {
                main = paste("DBEST Result : Stand #",index,sep = ""),
                lwd = 3,
                col = 'blue',
-               ylim = c(-0.15,0.8),
+               ylim = c(-0.2,1),
                axes = FALSE,
   )
   
@@ -146,8 +144,8 @@ for (i in TS_DF$X) {
   NDVIvals1 = as.numeric(as.vector(TS_DF[(i+1),2:length(TS_DF)]))
   
   ts1 = zoo(x = NDVIvals1,order.by = dates)
-  
-  ## implimenting DBEST change detection / generalization
+
+# # implimenting DBEST change detection / generalization
 #   generalization = DBEST(data = ts1,
 #                           data.type = 'non-cyclical',
 #                           algorithm = "generalization",
@@ -164,10 +162,10 @@ for (i in TS_DF$X) {
                   data.type = 'non-cyclical',
                   algorithm = "change detection",
                   breakpoints.no = 2,
-                  first.level.shift = 0.25,
+                  first.level.shift = 0.20,
                   second.level.shift = 0.15,
                   duration = 5,
-                  distance.threshold = 'default',
+                  distance.threshold = 0.15,
                   alpha = 0.05,
                   plot = 'no'
   )
