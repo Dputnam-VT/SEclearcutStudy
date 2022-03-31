@@ -1,7 +1,7 @@
 setwd("C:/R_workspace")
 library(DBEST)
 library(zoo)
-TS_DF = read.csv("timeSeriesDF500.csv",header = TRUE)
+TS_DF = read.csv("timeSeriesDF500_3.csv",header = TRUE)
 
 ## creating the dates for the time series index
 startYear = colnames(TS_DF)[2]
@@ -21,7 +21,6 @@ for (arrayNum in TS_DF[,1]) {
   aArray = TS_DF[(arrayNum+1),]
   NonNAindex = which(!is.na(aArray))
   if (length(NonNAindex) != length(aArray)){
-    aResult = 'this worked'
     firstNonNA = NonNAindex[2]
     fillVal = as.double(aArray[firstNonNA])
     for (i in seq(from = 2, to = (firstNonNA-1))) {
@@ -145,24 +144,24 @@ for (i in TS_DF$X) {
   
   ts1 = zoo(x = NDVIvals1,order.by = dates)
 
-# # implimenting DBEST change detection / generalization
+# implimenting DBEST change detection / generalization
 #   generalization = DBEST(data = ts1,
 #                           data.type = 'non-cyclical',
 #                           algorithm = "generalization",
 #                           change.magnitude = 0.25,
-#                           first.level.shift = 0.3,
+#                           first.level.shift = 0.25,
 #                           second.level.shift = 0.15,
 #                           duration = 5,
-#                           distance.threshold = 'default',
+#                           distance.threshold = 0.15,
 #                           alpha = 0.05,
 #                           plot = 'no'
 # )
   
-  output = DBEST(data = ts1, #generalization$Fit
+  output = DBEST(data = ts1, # data = generalization$Fit,
                   data.type = 'non-cyclical',
                   algorithm = "change detection",
-                  breakpoints.no = 2,
-                  first.level.shift = 0.20,
+                  change.magnitude = 0.25,
+                  first.level.shift = 0.25,
                   second.level.shift = 0.15,
                   duration = 5,
                   distance.threshold = 0.15,
