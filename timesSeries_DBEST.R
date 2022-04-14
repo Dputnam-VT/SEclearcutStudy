@@ -2,7 +2,7 @@ setwd("C:/R_workspace")
 library(DBEST)
 library(zoo)
 library(lubridate)
-TS_DF = read.csv("timeSeriesDF500_3.csv",header = TRUE)
+TS_DF = read.csv("timeSeriesDF500_4.csv",header = TRUE)
 
 ## creating the dates for the time series index
 startYear = colnames(TS_DF)[2]
@@ -111,8 +111,8 @@ plot_DBEST = function(DBEST_object,index,metricDF,auxDF) {
   points(x = c(as.Date(as.yearmon(dates[1]) -0.95, frac = 1),
                as.Date(as.yearmon(dates[1]) -0.99, frac = 1)
                ),
-         y = c(metricDF[3,2],
-               metricDF[3,3]
+         y = c(metricDF[index+1,2],
+               metricDF[index+1,3]
                ),
          col = c('orange','green'),
          pch = '-',
@@ -229,13 +229,13 @@ for (i in TS_DF$X) {
   output = DBEST(data = ts1, # data = generalization$Fit,
                   data.type = 'non-cyclical',
                   algorithm = "change detection",
-                  change.magnitude = 0.25,
-                  first.level.shift = 0.25,
-                  second.level.shift = 0.15,
-                  duration = 3,
+                  breakpoints.no = 4,
+                  first.level.shift = 0.20,
+                  second.level.shift = 0.25,
+                  duration = 6,
                   distance.threshold = 0.15,
                   alpha = 0.05,
-                  plot = 'no'
+                  plot = 'off'
   )
   
   # Calculate recovery metrics and auxilary data
@@ -256,15 +256,176 @@ for (i in TS_DF$X) {
       )
 }
 
+write.csv(rMetrics,file = "RecoveryMetrics_output.csv", )
+
 ### Post Segmentation evaluation of the time series data / metrics ###
-goodDataY2R = rMetrics$Y2R[is.na(rMetrics$Y2R) == FALSE]
+# need to add the identifier as a column for tracking things during filtering
+rMetrics$'UniqueID' = row.names(rMetrics)
+rMetrics$'recovDif' = rMetrics$post_CutMean - rMetrics$pre_CutMean
+auxSegData$'UniqueID' = row.names(rMetrics)
 
 areNAindicies = which(is.na(rMetrics$Y2R) == TRUE)
 
-bigGapData = auxSegData$gainLossGap[is.na(auxSegData$gainLossGap) == FALSE]
-bigGapData = bigGapData[bigGapData > 3]
+bigGapIndices = which(auxSegData$gainLossGap > 3)
+bigGapLengths = auxSegData$gainLossGap[bigGapIndices]
 
-totalNumberOfBadDataPoints = length(bigGapData) + length(areNAindicies)
+totalNumberOfBadDataPoints = length(bigGapIndices) + length(areNAindicies)
 cat("Number of bad time series :",totalNumberOfBadDataPoints)
 
-write.csv(rMetrics,file = "RecoveryMetrics_output.csv")
+## Creating a new dataframe with only good values
+goodDataDF = rMetrics[which(is.na(rMetrics$YearOfCut) == FALSE),]
+
+auxSegData$'DistDuration' = auxSegData$DistEndIndex - auxSegData$DistStartIndex
+
+for (ID in goodDataDF$UniqueID) {
+  gapLength = auxSegData[which(auxSegData$UniqueID == ID),5]
+  distDuration = as.numeric(auxSegData[which(auxSegData$UniqueID == ID),7])
+  if ((gapLength > 3) | (distDuration > 3)) {
+    indexValue = which(goodDataDF$UniqueID == ID)
+    goodDataDF = goodDataDF[-indexValue,]
+  }
+}
+
+# Create seperate arrays for each year of disturbance
+arraysList = list()
+indexVal = 1
+for (Y in sort(unique(goodDataDF$YearOfCut))) {
+  YIndices = which(goodDataDF$YearOfCut == Y)
+  values = goodDataDF$recovDif[YIndices]
+  arraysList[[indexVal]] = values
+  indexVal = indexVal + 1
+}
+
+# create seperate Y2R arrays for whole latitudes
+arraysList = list()
+ecoRegionInfo$intLat = floor(ecoRegionInfo$POINT_Y)
+lats = sort(unique(ecoRegionInfo$intLat))
+indexVal = 1
+for (D in lats) {
+  regionIndices = which((ecoRegionInfo$intLat == D))
+  IDs = ecoRegionInfo$UniqueID[regionIndices]
+  metricDFindicies = match(goodDataDF$UniqueID, as.character(IDs))
+  metricDFindicies = metricDFindicies[!is.na(metricDFindicies)]
+  Y2Rs = goodDataDF$recovDif[metricDFindicies] # Change metric here
+  arraysList[[indexVal]] = Y2Rs
+  indexVal = indexVal + 1
+}
+
+# Analysis based on Ecoregion
+ecoRegionInfo = read.csv(file = "samplePointEcoR_table.csv")
+
+# create seperate Y2R arrays for each ecoregion
+arraysList = list()
+indexVal = 1
+for (e in unique(ecoRegionInfo$US_L3NAME)) {
+  regionIndices = which(ecoRegionInfo$US_L3NAME == e)
+  IDs = ecoRegionInfo$UniqueID[regionIndices]
+  metricDFindicies = match(goodDataDF$UniqueID, as.character(IDs))
+  metricDFindicies = metricDFindicies[!is.na(metricDFindicies)]
+  Y2Rs = goodDataDF$Y2R[metricDFindicies] # Change metric here
+  arraysList[[indexVal]] = Y2Rs
+  indexVal = indexVal + 1
+}
+
+### Making some results plots
+library(beanplot)
+
+listOfVectorColors = list(
+  c("#A9A87B","white","black","red"),
+  c("#90D189","white","black","red"),
+  c("#77D1D3","white","black","red"),
+  c("#579D58","white","black","red"),
+  c("#CDD174","white","black","red"),
+  c("#5B9E7C","white","black","red"),
+  c("#7FE4BE","white","black","red"),
+  c("#B5E27D","white","black","red"),
+  c("#D2DEA1","white","black","red")
+)
+beanplot(arraysList,
+         main = "Ecotonal Variation in Y2R Metric",
+         ll = 0.55,
+         ylab = "Y2R (Years)",
+         xaxt = "n",
+         cutmin = 0,
+         cutmax = 13,
+         col = listOfVectorColors
+         )
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE, at = seq(1,length(arraysList)))
+
+## Draw the x-axis labels.
+text(x = 1:length(arraysList),
+     ## Move labels to just below bottom of chart.
+     y = par("usr")[3] - 0.60,
+     ## Use names from the data list.
+     labels = unique(ecoRegionInfo$US_L3NAME), #unique(ecoRegionInfo$US_L3NAME,)
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 18,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.9,
+     ## Increase label size.
+     cex = 1.1
+)
+
+hist.default(goodDataY2R,
+             main = "Distribution of Years to Recovery (Y2R) Metric",
+             xlab = "Recovery Duration (Years)",
+             )
+
+#### blind copied, just trying to quickly make the plot look good ####
+
+makeBoxPlots = function(AlistOfArrays, labels, labelAdj, MainTitle, Ylabel) {
+
+  ## Adjust some graphical parameters.
+  par(mar = c(6.1, 4.1, 4.1, 4.1), # change the margins
+      lwd = 2, # increase the line thickness
+      cex.axis = 1.2 # increase default axis label size
+  )
+  
+  ## Draw boxplot with no axes.
+  boxplot(AlistOfArrays, xaxt = "n", yaxt = "n", main = MainTitle)
+  
+  ## Draw x-axis without labels.
+  axis(side = 1, labels = FALSE, at = seq(1,length(arraysList)))
+  
+  ## Draw y-axis.
+  axis(side = 2,
+       ## Rotate labels perpendicular to y-axis.
+       las = 2,
+       ## Adjust y-axis label positions.
+       mgp = c(3, 0.75, 0))
+  
+  ## Draw the x-axis labels.
+  text(x = 1:length(arraysList),
+       ## Move labels to just below bottom of chart.
+       y = par("usr")[3] - labelAdj,
+       ## Use names from the data list.
+       labels = labels, #unique(ecoRegionInfo$US_L3NAME,)
+       ## Change the clipping region.
+       xpd = NA,
+       ## Rotate the labels by 35 degrees.
+       srt = 45,
+       ## Adjust the labels to almost 100% right-justified.
+       adj = 0.9,
+       ## Increase label size.
+       cex = 1.1
+       )
+  
+  mtext(Ylabel,
+        side = 2,
+        adj = 0.5,
+        line = 2.7,
+        cex = 1.2
+  )
+  
+  mtext("Year of Disturbance",
+        side = 1,
+        adj = 0.5,
+        line = 2.7,
+        cex = 1.2
+  )
+  
+}
+
