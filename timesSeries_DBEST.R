@@ -2,6 +2,9 @@ setwd("C:/R_workspace")
 library(DBEST)
 library(zoo)
 library(lubridate)
+library(tidyverse)
+library(RColorBrewer)
+
 TS_DF = read.csv("timeSeriesDF500_4.csv",header = TRUE)
 
 ## creating the dates for the time series index
@@ -17,16 +20,26 @@ endDate = as.Date.character(endDate,format = '%Y-%m-%d')
 
 dates = seq(startDate,endDate, by = 'years')
 
-# back filling missing values at beginning of time-series with first value
+# filling in missing values not calculated by the pandas interpolation 
+#   (start and end values)
 for (arrayNum in TS_DF[,1]) {
   aArray = TS_DF[(arrayNum+1),]
   NonNAindex = which(!is.na(aArray))
   if (length(NonNAindex) != length(aArray)){
     firstNonNA = NonNAindex[2]
     fillVal = as.double(aArray[firstNonNA])
-    for (i in seq(from = 2, to = (firstNonNA-1))) {
+    for (i in seq(from = 2, to = (firstNonNA))) {
       aArray[i] = fillVal
     }
+    
+  NonNAindex2 = which(!is.na(aArray)) # check to see if NA's remain (end values)
+  if (length(NonNAindex2) != length(aArray)){
+    lastNonNA = NonNAindex2[length(NonNAindex2)]
+    fillVal = as.double(aArray[lastNonNA])
+    for (i in seq(from = (lastNonNA+1), to = length(aArray))) {
+      aArray[i] = fillVal
+    }
+  }
     TS_DF[(arrayNum+1),] = aArray
   }
 }
@@ -161,21 +174,21 @@ calcRecoveryMetrics = function(DBEST_object, index) {
   gainSegEndDate = dates[DBEST_object$End[gainIndex]]
   gainSegEndIndex = DBEST_object$End[gainIndex]
   
-  # This statement allows for an additional segment up to 2 years directly after the first gain segment to be identified as the official
-  #     end of the disturbance, many time series have their full recovery period split into two segments
-  if (length(gainSegIndices) > 1) {
-    maxDateForGain2 = dates[DBEST_object$End[gainIndex]] %m+% years(2)
-    gainIndex2 = gainSegIndices[which((gainSegStartDates >= dates[DBEST_object$End[gainIndex]]) & (gainSegStartDates <= maxDateForGain2))]
-    if (length(gainIndex2) == 0){ 
-      gainIndex2 = gainIndex # for time series which do not have multiple gains after loss
-    } else if (length(gainIndex2) > 1) {
-      # for time series which have two gain segments within 2 years of the end of the disturbance, 
-      #   takes the gain segment with the newest start date
-      gainIndex2 = gainIndex2[which.max(dates[DBEST_object$Start[gainIndex2]])] 
-    }
-    gainSegEndDate = dates[DBEST_object$End[gainIndex2]]
-    gainSegEndIndex = DBEST_object$End[gainIndex2]
-  }
+  # # This statement allows for an additional segment up to 2 years directly after the first gain segment to be identified as the official
+  # #     end of the disturbance, many time series have their full recovery period split into two segments
+  # if (length(gainSegIndices) > 1) {
+  #   maxDateForGain2 = dates[DBEST_object$End[gainIndex]] %m+% years(2)
+  #   gainIndex2 = gainSegIndices[which((gainSegStartDates >= dates[DBEST_object$End[gainIndex]]) & (gainSegStartDates <= maxDateForGain2))]
+  #   if (length(gainIndex2) == 0){ 
+  #     gainIndex2 = gainIndex # for time series which do not have multiple gains after loss
+  #   } else if (length(gainIndex2) > 1) {
+  #     # for time series which have two gain segments within 2 years of the end of the disturbance, 
+  #     #   takes the gain segment with the newest start date
+  #     gainIndex2 = gainIndex2[which.max(dates[DBEST_object$Start[gainIndex2]])] 
+  #   }
+  #   gainSegEndDate = dates[DBEST_object$End[gainIndex2]]
+  #   gainSegEndIndex = DBEST_object$End[gainIndex2]
+  # }
   
   DistStartY = as.double(substr(as.character.Date(distSegStartDate), start = 0, stop = 4))
   
@@ -217,6 +230,59 @@ calcRecoveryMetrics = function(DBEST_object, index) {
 
 }
 
+### Experimental function, finding the confidence of the segmentation ###
+
+DBEST_rep = function(inputZooTS, numIterations) {
+  
+  segStarts = matrix(nrow = numIterations, ncol = 3) # segments start index
+  
+  segEnds = matrix(nrow = numIterations, ncol = 3) # segments end index
+  
+  fits = matrix(nrow = numIterations, ncol = 37) # fit data values
+  
+  parameterMatrix = matrix(nrow = numIterations, ncol = 4) # Recording the parameter values
+  
+  for (rep in seq(1,numIterations)) {
+    
+    firstLS = runif(1,0.10,0.50)
+    secondLS = runif(1,0.15,0.55)
+    dur = round(runif(1,2,10),digits = 0)
+    dist = runif(1,0.01,0.20)
+    parameterMatrix[rep,] = c(firstLS,secondLS,dur,dist)
+    
+    iterationOut = DBEST(data = ts1,
+                         data.type = 'non-cyclical',
+                         algorithm = "change detection",
+                         breakpoints.no = 3,
+                         first.level.shift = firstLS,
+                         second.level.shift = secondLS,
+                         duration = dur,
+                         distance.threshold = dist,
+                         alpha = 0.05,
+                         plot = 'off'
+    )
+    
+    startsArray = iterationOut$Start
+    endsArray = iterationOut$End
+    fitsArray = iterationOut$Fit
+    while (length(startsArray) < 3) {
+      endsArray = append(endsArray,NA)
+      startsArray = append(startsArray,NA)
+    }
+    segStarts[rep,] = sort(startsArray, na.last = TRUE)
+    segEnds[rep,] = sort(endsArray, na.last = TRUE)
+    fits[rep,] = fitsArray
+  }
+  return(list(segStarts,segEnds,fits,parameterMatrix))
+}
+
+# Also a function to calculate the mode #
+# Create the function.
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
 # implimenting DBEST, plotting results, and storing recovery metrics
 
 for (i in TS_DF$X) {
@@ -226,14 +292,68 @@ for (i in TS_DF$X) {
   
   ts1 = zoo(x = NDVIvals1,order.by = dates)
   
-  output = DBEST(data = ts1, # data = generalization$Fit,
+  # repList = DBEST_rep(ts1,50) # repeatly trying out randomly selected parameter values for segmentation
+  # 
+  # #### test plotting to visualize the variations in segmentation ####
+  # 
+  # 
+  # plot.default(repList[[3]][1,],type = 'l', ylim = c(-0.2,1))
+  # for (n in seq(2,50)) {
+  #   lines(repList[[3]][n,])
+  # }
+  # points(x = repList[[1]], y = coredata(ts1)[repList[[1]]],
+  #        col = 'green', cex = 2.0)
+  # points(x = repList[[2]], y = coredata(ts1)[repList[[2]]],
+  #        col = 'red')
+  # lines(coredata(ts1),col = 'blue')
+  # 
+  # # Trying out a mean annual VI value
+  # meanValues = c()
+  # for (year in seq(1,50)) {
+  #   yearVals = repList[[3]][,year]
+  #   meanVal = mean(yearVals)
+  #   meanValues = append(meanValues,meanVal)
+  # }
+  # lines(x = seq(1,37),y = meanValues, col = 'red')
+  # 
+  # # trying out a majority vote for segment starts and ends
+  # majorityStarts = c()
+  # for (segN in seq(1,3)) {
+  #   start = getmode(repList[[1]][,segN])
+  #   majorityStarts[segN] = start
+  # }
+  # majorityEnds = c()
+  # for (segN in seq(1,3)) {
+  #   end = getmode(repList[[2]][,segN])
+  #   majorityEnds[segN] = end
+  # }
+  # plot.default(coredata(ts1),col = 'blue', type = 'l')
+  # # adding lines for the disturbance segments
+  # for (v in c(1,2,3)) {
+  #   segments(x0 = majorityStarts[v],
+  #            y0 = coredata(ts1)[majorityStarts[v]],
+  #            x1 = majorityEnds[v],
+  #            y1 = coredata(ts1)[majorityEnds[v]],
+  #            col = 'yellow',
+  #            lty = 1,
+  #            lwd = 3
+  #   )
+  # }
+  # 
+  # # trying out a matching approach which finds the total number of
+  # #   unique start and end combinations
+  # uniqueStarts = unique(repList[[1]])
+  # uniqueEnds = unique(repList[[2]])
+  
+
+  output = DBEST(data = ts1,
                   data.type = 'non-cyclical',
                   algorithm = "change detection",
-                  breakpoints.no = 4,
-                  first.level.shift = 0.20,
-                  second.level.shift = 0.25,
-                  duration = 6,
-                  distance.threshold = 0.15,
+                  breakpoints.no = 3,
+                  first.level.shift = 0.25,
+                  second.level.shift = 0.35,
+                  duration = 5,
+                  distance.threshold = 0.10,
                   alpha = 0.05,
                   plot = 'off'
   )
@@ -284,148 +404,80 @@ for (ID in goodDataDF$UniqueID) {
     indexValue = which(goodDataDF$UniqueID == ID)
     goodDataDF = goodDataDF[-indexValue,]
   }
-}
+} # removing stands with large gaps between disturbance end and recovery start
 
-# Create seperate arrays for each year of disturbance
-arraysList = list()
-indexVal = 1
-for (Y in sort(unique(goodDataDF$YearOfCut))) {
-  YIndices = which(goodDataDF$YearOfCut == Y)
-  values = goodDataDF$recovDif[YIndices]
-  arraysList[[indexVal]] = values
-  indexVal = indexVal + 1
-}
+#### new data visualization plotting methods ####
 
-# create seperate Y2R arrays for whole latitudes
-arraysList = list()
+# merging the ecoregion info and good data for plotting #
 ecoRegionInfo$intLat = floor(ecoRegionInfo$POINT_Y)
-lats = sort(unique(ecoRegionInfo$intLat))
-indexVal = 1
-for (D in lats) {
-  regionIndices = which((ecoRegionInfo$intLat == D))
-  IDs = ecoRegionInfo$UniqueID[regionIndices]
-  metricDFindicies = match(goodDataDF$UniqueID, as.character(IDs))
-  metricDFindicies = metricDFindicies[!is.na(metricDFindicies)]
-  Y2Rs = goodDataDF$recovDif[metricDFindicies] # Change metric here
-  arraysList[[indexVal]] = Y2Rs
-  indexVal = indexVal + 1
+plottingDF = merge(x = goodDataDF,
+                   y = ecoRegionInfo,
+                   by = 'UniqueID'
+                   )
+
+# making a list of recovery metrics to plot
+metrics = c('Recovery_min','Recovery_max','Recovery_mag','Y2R',
+            'Recovery_slope','recovDif')
+
+#---------------- Ungrouped Stats plots for each metric ----------------------#
+for (aMetric in metrics){
+  summaryStats = ggplot(data = plottingDF, 
+                         aes_string(x = aMetric))+ 
+    geom_histogram(bins = 25)+
+    #geom_vline(aes(xintercept = mean(aMetric)), color = 'red')
+    labs(title = paste("Distribution of",aMetric, "Metric"))
+    print(summaryStats)
 }
 
-# Analysis based on Ecoregion
-ecoRegionInfo = read.csv(file = "samplePointEcoR_table.csv")
+#---------------- Stratifying by disturbance year ----------------------------#
+# Need to create a subset of the data that fall within the time window I want
+distWindowDF = plottingDF[which(plottingDF$YearOfCut >= 1994 & plottingDF$YearOfCut <= 2010),]
+distWindowDF$YearOfCut = as.factor(distWindowDF$YearOfCut)
 
-# create seperate Y2R arrays for each ecoregion
-arraysList = list()
-indexVal = 1
-for (e in unique(ecoRegionInfo$US_L3NAME)) {
-  regionIndices = which(ecoRegionInfo$US_L3NAME == e)
-  IDs = ecoRegionInfo$UniqueID[regionIndices]
-  metricDFindicies = match(goodDataDF$UniqueID, as.character(IDs))
-  metricDFindicies = metricDFindicies[!is.na(metricDFindicies)]
-  Y2Rs = goodDataDF$Y2R[metricDFindicies] # Change metric here
-  arraysList[[indexVal]] = Y2Rs
-  indexVal = indexVal + 1
+for (aMetric in metrics){
+  yearsPlot = ggplot(data = distWindowDF, 
+                     aes_string(x = 'YearOfCut', y = aMetric,group = 1)
+                     )+
+    #geom_bin_2d(drop = FALSE)+
+    geom_point()+
+    stat_smooth(size = 1.5,
+                method = 'loess',
+                span = 0.80,
+                show.legend = TRUE)+
+    labs(title = paste("Variation in",aMetric,"by Disturbance Year")
+         )+
+    xlab("Year of Disturbance")
+  print(yearsPlot)
 }
 
-### Making some results plots
-library(beanplot)
-
-listOfVectorColors = list(
-  c("#A9A87B","white","black","red"),
-  c("#90D189","white","black","red"),
-  c("#77D1D3","white","black","red"),
-  c("#579D58","white","black","red"),
-  c("#CDD174","white","black","red"),
-  c("#5B9E7C","white","black","red"),
-  c("#7FE4BE","white","black","red"),
-  c("#B5E27D","white","black","red"),
-  c("#D2DEA1","white","black","red")
-)
-beanplot(arraysList,
-         main = "Ecotonal Variation in Y2R Metric",
-         ll = 0.55,
-         ylab = "Y2R (Years)",
-         xaxt = "n",
-         cutmin = 0,
-         cutmax = 13,
-         col = listOfVectorColors
-         )
-## Draw x-axis without labels.
-axis(side = 1, labels = FALSE, at = seq(1,length(arraysList)))
-
-## Draw the x-axis labels.
-text(x = 1:length(arraysList),
-     ## Move labels to just below bottom of chart.
-     y = par("usr")[3] - 0.60,
-     ## Use names from the data list.
-     labels = unique(ecoRegionInfo$US_L3NAME), #unique(ecoRegionInfo$US_L3NAME,)
-     ## Change the clipping region.
-     xpd = NA,
-     ## Rotate the labels by 35 degrees.
-     srt = 18,
-     ## Adjust the labels to almost 100% right-justified.
-     adj = 0.9,
-     ## Increase label size.
-     cex = 1.1
-)
-
-hist.default(goodDataY2R,
-             main = "Distribution of Years to Recovery (Y2R) Metric",
-             xlab = "Recovery Duration (Years)",
-             )
-
-#### blind copied, just trying to quickly make the plot look good ####
-
-makeBoxPlots = function(AlistOfArrays, labels, labelAdj, MainTitle, Ylabel) {
-
-  ## Adjust some graphical parameters.
-  par(mar = c(6.1, 4.1, 4.1, 4.1), # change the margins
-      lwd = 2, # increase the line thickness
-      cex.axis = 1.2 # increase default axis label size
-  )
-  
-  ## Draw boxplot with no axes.
-  boxplot(AlistOfArrays, xaxt = "n", yaxt = "n", main = MainTitle)
-  
-  ## Draw x-axis without labels.
-  axis(side = 1, labels = FALSE, at = seq(1,length(arraysList)))
-  
-  ## Draw y-axis.
-  axis(side = 2,
-       ## Rotate labels perpendicular to y-axis.
-       las = 2,
-       ## Adjust y-axis label positions.
-       mgp = c(3, 0.75, 0))
-  
-  ## Draw the x-axis labels.
-  text(x = 1:length(arraysList),
-       ## Move labels to just below bottom of chart.
-       y = par("usr")[3] - labelAdj,
-       ## Use names from the data list.
-       labels = labels, #unique(ecoRegionInfo$US_L3NAME,)
-       ## Change the clipping region.
-       xpd = NA,
-       ## Rotate the labels by 35 degrees.
-       srt = 45,
-       ## Adjust the labels to almost 100% right-justified.
-       adj = 0.9,
-       ## Increase label size.
-       cex = 1.1
-       )
-  
-  mtext(Ylabel,
-        side = 2,
-        adj = 0.5,
-        line = 2.7,
-        cex = 1.2
-  )
-  
-  mtext("Year of Disturbance",
-        side = 1,
-        adj = 0.5,
-        line = 2.7,
-        cex = 1.2
-  )
-  
+#---------------- Stratifying by whole lattitudes ----------------------------#
+plottingDF$intLat =as.factor(plottingDF$intLat)
+for (aMetric in metrics){
+  lattitudePlot = ggplot(data = plottingDF, 
+                         aes_string(x = 'intLat', y = aMetric)
+                         ) + 
+    geom_violin(trim = TRUE)+
+    stat_summary(fun = mean,geom = 'crossbar', color = 'black',width = 0.7)+
+    labs(title = paste("Variation in",aMetric,"Within Degrees of Latitude"))
+    xlab(NULL)+
+    theme(axis.text.x = element_text(angle = 20,vjust = 0.95,hjust = 0.9), 
+          legend.position = 'none'
+    )+
+  print(lattitudePlot)
 }
 
+#-------------------- Stratifying by Ecoregions ------------------------------#
+for (aMetric in metrics){
+  ecoRegionPlot = ggplot(data = plottingDF, 
+                         aes_string(x = 'US_L3NAME', y = aMetric, fill = 'US_L3NAME')
+                         )+ 
+    geom_violin(trim = TRUE)+
+    stat_summary(fun = mean,geom = 'crossbar', color = 'black',width = 0.7)+
+    labs(title = paste("Variation in",aMetric,"Within EcoRegions"))+
+    xlab(NULL)+
+    theme(axis.text.x = element_text(angle = 20,vjust = 0.95,hjust = 0.9), 
+          legend.position = 'none'
+          )+
+    scale_fill_brewer(palette = 'Set1')
+  print(ecoRegionPlot)
+}
