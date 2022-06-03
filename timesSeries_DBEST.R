@@ -5,7 +5,10 @@ library(lubridate)
 library(tidyverse)
 library(RColorBrewer)
 
-TS_DF = read.csv("timeSeriesDF500_4.csv",header = TRUE)
+dataDate = "2022_05_26"
+
+inputDF = read.csv(paste("timeSeriesDF500_",dataDate,".csv",sep = ""),header = TRUE)
+TS_DF = inputDF[order(inputDF$X),]
 
 ## creating the dates for the time series index
 startYear = colnames(TS_DF)[2]
@@ -50,8 +53,8 @@ colnames(rMetrics) = c('YearOfCut','Recovery_min','Recovery_max','Recovery_mag',
 rownames(rMetrics) = TS_DF$X
 
 # Dataframe to store auxiliary data for plotting (start dates for segments, etc.)
-auxSegData <- data.frame(matrix(nrow = length(rownames(TS_DF)), ncol = 5,byrow = TRUE))
-colnames(auxSegData) = c('DistStartIndex','DistEndIndex','RecoveryStartIndex','RecoveryEndIndex','gainLossGap')
+auxSegData <- data.frame(matrix(nrow = length(rownames(TS_DF)), ncol = 6,byrow = TRUE))
+colnames(auxSegData) = c('DistStartIndex','DistEndIndex','RecoveryStartIndex','RecoveryEndIndex','gainLossGap','fitRMSE')
 rownames(auxSegData) = TS_DF$X
 
 ## Function to plot the DBEST output correctly
@@ -205,11 +208,13 @@ calcRecoveryMetrics = function(DBEST_object, index) {
   
   gapInGainLoss = as.double(DBEST_object$Start[gainIndex] - DBEST_object$End[distIndex]) # Gap between the end of the disturbance segment and the start of the gain segment
   
+  RMSE = sqrt(mean((DBEST_object$Fit - DBEST_object$Data)^2))
+  
   ## Adding recovery metrics to an array to be returned from the function
   rMetricsArray = c(DistStartY,recovMin,recovMax,recoveryMag,Y2R,recovSlope)
   
   ## Adding auxiliary data to dataframe
-  auxSegArray = c(DBEST_object$Start[distIndex],DBEST_object$End[distIndex],DBEST_object$Start[gainIndex],gainSegEndIndex,gapInGainLoss)
+  auxSegArray = c(DBEST_object$Start[distIndex],DBEST_object$End[distIndex],DBEST_object$Start[gainIndex],gainSegEndIndex,gapInGainLoss,RMSE)
   
   ## Adding a statement to remove data from bad time series
   # i.e time series with no gain, no loss, or only one segment
@@ -219,12 +224,12 @@ calcRecoveryMetrics = function(DBEST_object, index) {
       (length(gainIndex) == 0)
       ) {
     rMetricsArray = rep(NA,8)
-    auxSegArray = rep(NA,5)
+    auxSegArray = rep(NA,6)
   } else {
     preDistMean = as.double(mean(DBEST_object$Data[0:DBEST_object$Start[distIndex]])) # Pre-disturbance mean VI value
     PostDistMean = as.double(mean(DBEST_object$Data[DBEST_object$End[distIndex]:length(dates)])) # Post-disturbance mean VI value
     rMetricsArray = append(rMetricsArray,c(preDistMean,PostDistMean)) # These have to be calculated seperately, since their indexing data
-  }                                                                   # if a time series doesn't have a gain or loss it'll crash without this 
+    }                                                                   # if a time series doesn't have a gain or loss it'll crash without this 
   
   return(list(rMetricsArray,auxSegArray))
 
@@ -238,9 +243,9 @@ DBEST_rep = function(inputZooTS, numIterations) {
   
   segEnds = matrix(nrow = numIterations, ncol = 3) # segments end index
   
-  fits = matrix(nrow = numIterations, ncol = 37) # fit data values
+  fits = matrix(nrow = numIterations, ncol = 38) # fit data values
   
-  parameterMatrix = matrix(nrow = numIterations, ncol = 4) # Recording the parameter values
+  parameterMatrix = matrix(nrow = numIterations, ncol = 5) # Recording the parameter values
   
   for (rep in seq(1,numIterations)) {
     
@@ -248,7 +253,6 @@ DBEST_rep = function(inputZooTS, numIterations) {
     secondLS = runif(1,0.15,0.55)
     dur = round(runif(1,2,10),digits = 0)
     dist = runif(1,0.01,0.20)
-    parameterMatrix[rep,] = c(firstLS,secondLS,dur,dist)
     
     iterationOut = DBEST(data = ts1,
                          data.type = 'non-cyclical',
@@ -261,6 +265,9 @@ DBEST_rep = function(inputZooTS, numIterations) {
                          alpha = 0.05,
                          plot = 'off'
     )
+    
+    RMSE = sqrt(mean((iterationOut$Fit - iterationOut$Data)^2))
+    parameterMatrix[rep,] = c(firstLS,secondLS,dur,dist,RMSE)
     
     startsArray = iterationOut$Start
     endsArray = iterationOut$End
@@ -292,7 +299,7 @@ for (i in TS_DF$X) {
   
   ts1 = zoo(x = NDVIvals1,order.by = dates)
   
-  # repList = DBEST_rep(ts1,50) # repeatly trying out randomly selected parameter values for segmentation
+  #repList = DBEST_rep(ts1,50) # repeatly trying out randomly selected parameter values for segmentation
   # 
   # #### test plotting to visualize the variations in segmentation ####
   # 
@@ -344,16 +351,15 @@ for (i in TS_DF$X) {
   # #   unique start and end combinations
   # uniqueStarts = unique(repList[[1]])
   # uniqueEnds = unique(repList[[2]])
-  
 
   output = DBEST(data = ts1,
                   data.type = 'non-cyclical',
                   algorithm = "change detection",
-                  breakpoints.no = 3,
-                  first.level.shift = 0.25,
-                  second.level.shift = 0.35,
+                  breakpoints.no = 4,
+                  first.level.shift = 0.20,
+                  second.level.shift = 0.30,
                   duration = 5,
-                  distance.threshold = 0.10,
+                  distance.threshold = 0.15,
                   alpha = 0.05,
                   plot = 'off'
   )
@@ -381,7 +387,7 @@ write.csv(rMetrics,file = "RecoveryMetrics_output.csv", )
 ### Post Segmentation evaluation of the time series data / metrics ###
 # need to add the identifier as a column for tracking things during filtering
 rMetrics$'UniqueID' = row.names(rMetrics)
-rMetrics$'recovDif' = rMetrics$post_CutMean - rMetrics$pre_CutMean
+rMetrics$'K_shift' = rMetrics$post_CutMean - rMetrics$pre_CutMean
 auxSegData$'UniqueID' = row.names(rMetrics)
 
 areNAindicies = which(is.na(rMetrics$Y2R) == TRUE)
@@ -394,12 +400,13 @@ cat("Number of bad time series :",totalNumberOfBadDataPoints)
 
 ## Creating a new dataframe with only good values
 goodDataDF = rMetrics[which(is.na(rMetrics$YearOfCut) == FALSE),]
+goodDataDF$fit_RMSE = auxSegData$fitRMSE[which(is.na(auxSegData$DistStartIndex) == FALSE)]
 
 auxSegData$'DistDuration' = auxSegData$DistEndIndex - auxSegData$DistStartIndex
 
 for (ID in goodDataDF$UniqueID) {
-  gapLength = auxSegData[which(auxSegData$UniqueID == ID),5]
-  distDuration = as.numeric(auxSegData[which(auxSegData$UniqueID == ID),7])
+  gapLength = auxSegData$gainLossGap[which(auxSegData$UniqueID == ID)]
+  distDuration = as.numeric(auxSegData$DistDuration[which(auxSegData$UniqueID == ID)])
   if ((gapLength > 3) | (distDuration > 3)) {
     indexValue = which(goodDataDF$UniqueID == ID)
     goodDataDF = goodDataDF[-indexValue,]
@@ -408,26 +415,42 @@ for (ID in goodDataDF$UniqueID) {
 
 #### new data visualization plotting methods ####
 
+ecoRegionInfo = read.csv(file = paste("standAttributes_",dataDate,".csv",sep = ""))
+
 # merging the ecoregion info and good data for plotting #
-ecoRegionInfo$intLat = floor(ecoRegionInfo$POINT_Y)
+ecoRegionInfo$intLat = floor(ecoRegionInfo$lat)
 plottingDF = merge(x = goodDataDF,
                    y = ecoRegionInfo,
-                   by = 'UniqueID'
+                   by.x = 'UniqueID',
+                   by.y = 'X'
                    )
 
 # making a list of recovery metrics to plot
 metrics = c('Recovery_min','Recovery_max','Recovery_mag','Y2R',
-            'Recovery_slope','recovDif')
+            'Recovery_slope','K_shift')
 
 #---------------- Ungrouped Stats plots for each metric ----------------------#
+# histograms
 for (aMetric in metrics){
   summaryStats = ggplot(data = plottingDF, 
                          aes_string(x = aMetric))+ 
-    geom_histogram(bins = 25)+
+    geom_histogram(bins = 20)+
     #geom_vline(aes(xintercept = mean(aMetric)), color = 'red')
     labs(title = paste("Distribution of",aMetric, "Metric"))
     print(summaryStats)
 }
+# boxplots
+# have to make a seperate DF for just the metrics for this one
+metricsDF = plottingDF %>% select(all_of(metrics[-4]))
+summaryStats = ggplot(data = stack(metricsDF), 
+                      aes(x = ind, y = values)
+                      )+ 
+  geom_boxplot()+
+  #geom_vline(aes(xintercept = mean(aMetric)), color = 'red')
+  labs(title = paste("Distribution of Selected Recovery Metrics"))+
+  xlab(NULL)+
+  ylab("NBR Value")
+print(summaryStats)
 
 #---------------- Stratifying by disturbance year ----------------------------#
 # Need to create a subset of the data that fall within the time window I want
@@ -467,9 +490,10 @@ for (aMetric in metrics){
 }
 
 #-------------------- Stratifying by Ecoregions ------------------------------#
+plottingDF$ecoR_code = as.character(plottingDF$ecoR_code)
 for (aMetric in metrics){
   ecoRegionPlot = ggplot(data = plottingDF, 
-                         aes_string(x = 'US_L3NAME', y = aMetric, fill = 'US_L3NAME')
+                         aes_string(x = 'ecoR_code', y = aMetric, fill = 'ecoR_code')
                          )+ 
     geom_violin(trim = TRUE)+
     stat_summary(fun = mean,geom = 'crossbar', color = 'black',width = 0.7)+
