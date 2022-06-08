@@ -5,10 +5,25 @@ library(lubridate)
 library(tidyverse)
 library(RColorBrewer)
 
-dataDate = "2022_05_26"
+dataDate1 = "2022_05_26" # using for the latest version of the time series csv
+dataDate2 = "2022_06_03" # using for the latest version of the stand attribute csv
+dataDate3 = "2022_06_08" # using for the latest version of the climate variables csv
 
-inputDF = read.csv(paste("timeSeriesDF500_",dataDate,".csv",sep = ""),header = TRUE)
+# Bringing in vegetation index time series
+inputDF = read.csv(paste("timeSeriesDF500_",dataDate1,".csv",sep = ""),header = TRUE)
 TS_DF = inputDF[order(inputDF$X),]
+
+# Bringing in topographic, soil, locational, and ecotonal data
+ecoRegionInfo = read.csv(file = paste("standAttributes_",dataDate2,".csv",sep = ""))
+
+# Bringing in the climate data for a single scenario first
+scenario = 'rcp45'
+precipTS_DF = read.csv(file = paste("precipDF_",scenario,"_",dataDate3,".csv",sep = ""))
+precipTS_DF = precipTS_DF[order(precipTS_DF$X),]
+minTempTS_DF = read.csv(file = paste("minTempDF_",scenario,"_",dataDate3,".csv",sep = ""))
+minTempTS_DF = minTempTS_DF[order(minTempTS_DF$X),]
+maxTempTS_DF = read.csv(file = paste("maxTempDF_",scenario,"_",dataDate3,".csv",sep = ""))
+maxTempTS_DF = maxTempTS_DF[order(maxTempTS_DF$X),]
 
 ## creating the dates for the time series index
 startYear = colnames(TS_DF)[2]
@@ -407,15 +422,13 @@ auxSegData$'DistDuration' = auxSegData$DistEndIndex - auxSegData$DistStartIndex
 for (ID in goodDataDF$UniqueID) {
   gapLength = auxSegData$gainLossGap[which(auxSegData$UniqueID == ID)]
   distDuration = as.numeric(auxSegData$DistDuration[which(auxSegData$UniqueID == ID)])
-  if ((gapLength > 3) | (distDuration > 3)) {
+  recovDuration = goodDataDF$Y2R[goodDataDF$UniqueID == ID]
+  if ((gapLength > 3) | (distDuration > 3) | (recovDuration <=2)) {
     indexValue = which(goodDataDF$UniqueID == ID)
     goodDataDF = goodDataDF[-indexValue,]
   }
 } # removing stands with large gaps between disturbance end and recovery start
 
-#### new data visualization plotting methods ####
-
-ecoRegionInfo = read.csv(file = paste("standAttributes_",dataDate,".csv",sep = ""))
 
 # merging the ecoregion info and good data for plotting #
 ecoRegionInfo$intLat = floor(ecoRegionInfo$lat)
@@ -424,6 +437,8 @@ plottingDF = merge(x = goodDataDF,
                    by.x = 'UniqueID',
                    by.y = 'X'
                    )
+
+#### new data visualization plotting methods ####
 
 # making a list of recovery metrics to plot
 metrics = c('Recovery_min','Recovery_max','Recovery_mag','Y2R',
