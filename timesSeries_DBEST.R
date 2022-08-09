@@ -5,167 +5,97 @@ library(lubridate)
 library(tidyverse)
 library(RColorBrewer)
 
-dataDate1 = "2022_05_26" # using for the latest version of the time series csv
-dataDate2 = "2022_06_03" # using for the latest version of the stand attribute csv
-dataDate3 = "2022_06_08" # using for the latest version of the climate variables csv
+dataDate1 = "2022_06_30" # using for the latest version of the time series csv
+dataDate2 = "2022_08_01" # using for the latest version of the stand attribute dataset
+dataDate3 = "2022_08_04" # using for the latest version of the climate variables csv
 
 # Bringing in vegetation index time series
-inputDF = read.csv(paste("timeSeriesDF500_",dataDate1,".csv",sep = ""),header = TRUE)
+inputDF = read.csv(paste("NBR_timeSeriesDF2000_",dataDate1,".csv",sep = ""),header = TRUE)
 TS_DF = inputDF[order(inputDF$X),]
 
-# Bringing in topographic, soil, locational, and ecotonal data
-ecoRegionInfo = read.csv(file = paste("standAttributes_",dataDate2,".csv",sep = ""))
+EVI2_DF = read.csv(paste("EVI2_timeSeriesDF2000_",dataDate1,".csv",sep = ""),header = TRUE)
+EVI2_DF = EVI2_DF[order(EVI2_DF$X),]
 
-# Bringing in the climate data for a single scenario first
-scenario = 'rcp45'
-precipTS_DF = read.csv(file = paste("precipDF_",scenario,"_",dataDate3,".csv",sep = ""))
-precipTS_DF = precipTS_DF[order(precipTS_DF$X),]
-minTempTS_DF = read.csv(file = paste("minTempDF_",scenario,"_",dataDate3,".csv",sep = ""))
-minTempTS_DF = minTempTS_DF[order(minTempTS_DF$X),]
-maxTempTS_DF = read.csv(file = paste("maxTempDF_",scenario,"_",dataDate3,".csv",sep = ""))
-maxTempTS_DF = maxTempTS_DF[order(maxTempTS_DF$X),]
+B5_DF = read.csv(paste("B5_timeSeriesDF2000_",dataDate1,".csv",sep = ""),header = TRUE)
+B5_DF = B5_DF[order(B5_DF$X),]
+
+TCC_DF = read.csv("AllCleanedData_ONLYtcc.csv",header = TRUE)
+TCC_DF = TCC_DF[order(TCC_DF$UniqueID),]
+
+# sznLength_DF = read.csv("seasonLength_timeSeriesDF_2022_07_14.csv",header = TRUE)
+# sznLength_DF = sznLength_DF[order(sznLength_DF$X),]
+# 
+# peakDay_DF = read.csv("PeakDay_timeSeriesDF_2022_07_14.csv",header = TRUE)
+# peakDay_DF = peakDay_DF[order(peakDay_DF$X),]
+# 
+# midSznLength_DF = read.csv("midSeasonLength_timeSeriesDF_2022_07_14.csv",header = TRUE)
+# midSznLength_DF = midSznLength_DF[order(midSznLength_DF$X),]
+# 
+# EVI2area_DF = read.csv("EVI2_Area_timeSeriesDF_2022_07_14.csv",header = TRUE)
+# EVI2area_DF = EVI2area_DF[order(EVI2area_DF$X),]
+
+numSamples = length(inputDF$X)
+
+reformatClimateData = function(unformattedDataframe,Nsamples){
+  newDF <- data.frame(matrix(nrow = Nsamples, ncol = 39,byrow = TRUE))
+  colnames(newDF) = c('UniqueID',as.character(seq(1984,2021)))
+  rownames(newDF) = unique(unformattedDataframe$'UniqueID')
+  
+  lastIncluded = 0
+  for (multiplier in seq(1,38)){
+    newDF[,(multiplier+1)] = unformattedDataframe$'mean'[(lastIncluded+1):(Nsamples*multiplier)]
+    lastIncluded = Nsamples*multiplier
+  }
+  newDF$UniqueID = unique(unformattedDataframe$'UniqueID')
+  return(newDF)
+}
+
+freezeDays_DF = read.csv(paste("gridmetMetrics/freeze_TS_",dataDate3,".csv", sep = ''),header = TRUE)
+freezeDays_DF = freezeDays_DF[,4:5]
+freezeDays_DF = reformatClimateData(freezeDays_DF,numSamples)
+
+GDD_DF = read.csv(paste("gridmetMetrics/GDD_TS_",dataDate3,".csv", sep = ''),header = TRUE)
+GDD_DF = GDD_DF[,4:5]
+GDD_DF = reformatClimateData(GDD_DF,numSamples)
+
+meanVPD_DF = read.csv(paste("gridmetMetrics/meanVPD_TS_",dataDate3,".csv", sep = ''),header = TRUE)
+meanVPD_DF = meanVPD_DF[,4:5]
+meanVPD_DF = reformatClimateData(meanVPD_DF,numSamples)
+
+totalPrecip_DF = read.csv(paste("gridmetMetrics/totalPrecip_TS_",dataDate3,".csv", sep = ''),header = TRUE)
+totalPrecip_DF = totalPrecip_DF[,4:5]
+totalPrecip_DF = reformatClimateData(totalPrecip_DF,numSamples)
+
+meanTemp_DF = read.csv(paste("gridmetMetrics/meanTemp_TS_",dataDate3,".csv", sep = ''),header = TRUE)
+meanTemp_DF = reformatClimateData(meanTemp_DF,numSamples)
+
+# Bringing in topographic, soil, locational, and ecotonal data
+ecoRegionInfo = read.csv(paste("standAttribute_values_",dataDate2,".csv",sep = ""),header = TRUE)
 
 ## creating the dates for the time series index
+compositeMonth = 2 # first month used for annual composite
+
 startYear = colnames(TS_DF)[2]
 startYear = substr(startYear, 2,5)
-startDate = paste(startYear,'-11-01',sep = '')
+startDate = paste(startYear,'-',compositeMonth,'-01',sep = '')
 startDate = as.Date.character(startDate,format = '%Y-%m-%d')
 
 endYear = colnames(TS_DF)[length(TS_DF)]
 endYear = substr(endYear, 2,5)
-endDate = paste(endYear,'-11-01',sep = '')
+endDate = paste(endYear,'-',compositeMonth,'-01',sep = '')
 endDate = as.Date.character(endDate,format = '%Y-%m-%d')
 
 dates = seq(startDate,endDate, by = 'years')
 
-# filling in missing values not calculated by the pandas interpolation 
-#   (start and end values)
-for (arrayNum in TS_DF[,1]) {
-  aArray = TS_DF[(arrayNum+1),]
-  NonNAindex = which(!is.na(aArray))
-  if (length(NonNAindex) != length(aArray)){
-    firstNonNA = NonNAindex[2]
-    fillVal = as.double(aArray[firstNonNA])
-    for (i in seq(from = 2, to = (firstNonNA))) {
-      aArray[i] = fillVal
-    }
-    
-  NonNAindex2 = which(!is.na(aArray)) # check to see if NA's remain (end values)
-  if (length(NonNAindex2) != length(aArray)){
-    lastNonNA = NonNAindex2[length(NonNAindex2)]
-    fillVal = as.double(aArray[lastNonNA])
-    for (i in seq(from = (lastNonNA+1), to = length(aArray))) {
-      aArray[i] = fillVal
-    }
-  }
-    TS_DF[(arrayNum+1),] = aArray
-  }
-}
-
 # Dataframe to store recovery metrics for each stand
-rMetrics <- data.frame(matrix(nrow = length(rownames(TS_DF)), ncol = 8,byrow = TRUE))
-colnames(rMetrics) = c('YearOfCut','Recovery_min','Recovery_max','Recovery_mag','Y2R','Recovery_slope','pre_CutMean','post_CutMean')
+rMetrics <- data.frame(matrix(nrow = length(rownames(TS_DF)), ncol = 13,byrow = TRUE))
+colnames(rMetrics) = c('YearOfCut','Recovery_min','Recovery_max','Recovery_mag','Disturbance_mag','Y2R','Recovery_slope','NBRy3','NBRy5','NBRy7','NBRy10','pre_CutMean','post_CutMean')
 rownames(rMetrics) = TS_DF$X
 
 # Dataframe to store auxiliary data for plotting (start dates for segments, etc.)
 auxSegData <- data.frame(matrix(nrow = length(rownames(TS_DF)), ncol = 6,byrow = TRUE))
 colnames(auxSegData) = c('DistStartIndex','DistEndIndex','RecoveryStartIndex','RecoveryEndIndex','gainLossGap','fitRMSE')
 rownames(auxSegData) = TS_DF$X
-
-## Function to plot the DBEST output correctly
-plot_DBEST = function(DBEST_object,index,metricDF,auxDF) {
-  # getting output device set up
-  svg(filename = paste('C:/R_workspace/images/ClearCutPlotsOnly/plot_',index,'_TimeSeriesGraph.svg',sep = ''),
-      width = 4,
-      height = 2,
-      pointsize = 4,
-      onefile = FALSE
-      )
-  
-  # plotting the generalization lines furthest back
-  plot.default(dates,as.vector(DBEST_object$Fit),
-               type = 'l',
-               xlab = 'YEAR',
-               ylab = 'NBR',
-               main = paste("DBEST Result : Stand #",index,sep = ""),
-               lwd = 3,
-               col = 'blue',
-               ylim = c(-0.2,1),
-               axes = FALSE,
-  )
-  
-  # getting axes customized
-  box()
-  axis.Date(1,at = seq(from = (startDate+365), to = endDate, by = '5 years'),labels = TRUE)
-  axis(2)
-  
-  # adding lines for the disturbance segments
-  for (i in c(1,3)) {
-    segments(x0 = dates[auxDF[index+1,i]],
-             y0 = DBEST_object$Fit[auxDF[index+1,i]],
-             x1 = dates[auxDF[index+1,i+1]],
-             y1 = DBEST_object$Fit[auxDF[index+1,i+1]],
-             col = 'yellow',
-             lty = 1,
-             lwd = 3
-             )
-  }
-  
-  # adding the original data last
-    # raw time-series from original dataframe
-  rawValues = as.numeric(as.vector(TS_DF[(index+1),2:length(TS_DF)]))
-    # adding to plot
-  lines(dates,as.vector(rawValues),
-        col = 'black',
-        lwd = 1,
-        lty = 2
-  )
-  
-  # adding bar to indicate disturbance duration
-    segments(x0 = dates[auxDF[index+1,2]],
-             y0 = -0.19,
-             x1 = dates[auxDF[index+1,4]],
-             y1 = -0.19,
-             col = 'red',
-             lty = 1,
-             lwd = 4.5
-    )
-  
-  # adding text to the graph for the disturbance duration
-  text(x = dates[round((mean(c(auxDF[index+1,2],auxDF[index+1,4]))),digits = 0)],
-       y = -0.145,
-       labels = paste(as.character(metricDF[index+1,5]),'Year Recovery'),
-       adj = 0.5
-       )
-  
-  # recovery min / max indicators on axis
-  points(x = c(as.Date(as.yearmon(dates[1]) -0.95, frac = 1),
-               as.Date(as.yearmon(dates[1]) -0.99, frac = 1)
-               ),
-         y = c(metricDF[index+1,2],
-               metricDF[index+1,3]
-               ),
-         col = c('orange','green'),
-         pch = '-',
-         cex = 4
-  )
-  
-  
-  # adding a legend
-  legend(x = dates[(length(dates)-8)],
-         y = 0.2,
-         legend = c('Original Time-series','DBEST Generalization','Disturbance Event','Recovery Min','Recovery Max'),
-         col = c('black','blue','yellow','orange','green'),
-         lty = c(2,1,1,NA,NA),
-         pch = c(NA,NA,NA,'-','-'),
-         pt.cex = c(NA,NA,NA,4,4),
-         lwd = c(1,2,2,NA,NA),
-         bg = 'light grey'
-  )
-  
-  # closing the graphical device
-  dev.off()
-}
 
 ## A function to calculate recovery metrics, will be looped over the output
 #   objects from DBEST, outputs to be passed to plotting function
@@ -178,6 +108,8 @@ calcRecoveryMetrics = function(DBEST_object, index) {
   distIndex = which.min(changeSeg_VIdif) # index value for breakpoint arrays for disturbance
   distSegEndDate = dates[DBEST_object$End[distIndex]] # date object of end of disturbance segment
   distSegStartDate = dates[DBEST_object$Start[distIndex]] # date object of start of disturbance segment
+  distStartIndex = DBEST_object$Start[distIndex]
+  distEndIndex = DBEST_object$End[distIndex]
   # index value for breakpoint arrays for recovery, should be an increasing segment directly after disturbance
   gainSegIndices = which(changeSeg_VIdif > 0)
   gainSegStartDates = dates[DBEST_object$Start[gainSegIndices]]
@@ -185,52 +117,15 @@ calcRecoveryMetrics = function(DBEST_object, index) {
   ## need to find the gain segment directly after the disturbance
   # making a list of the possible dates for possible gain segments
   potentialGainSegStartDates = gainSegStartDates[gainSegStartDates >= distSegEndDate]
+  
   # adding the disturbance end date to the list
   potentialGainSegStartDates = sort(potentialGainSegStartDates,decreasing = FALSE)
   gainIndex = gainSegIndices[which(gainSegStartDates == potentialGainSegStartDates[1])]
   gainSegStartDate = dates[DBEST_object$Start[gainIndex]]
   gainSegEndDate = dates[DBEST_object$End[gainIndex]]
   gainSegEndIndex = DBEST_object$End[gainIndex]
-  
-  # # This statement allows for an additional segment up to 2 years directly after the first gain segment to be identified as the official
-  # #     end of the disturbance, many time series have their full recovery period split into two segments
-  # if (length(gainSegIndices) > 1) {
-  #   maxDateForGain2 = dates[DBEST_object$End[gainIndex]] %m+% years(2)
-  #   gainIndex2 = gainSegIndices[which((gainSegStartDates >= dates[DBEST_object$End[gainIndex]]) & (gainSegStartDates <= maxDateForGain2))]
-  #   if (length(gainIndex2) == 0){ 
-  #     gainIndex2 = gainIndex # for time series which do not have multiple gains after loss
-  #   } else if (length(gainIndex2) > 1) {
-  #     # for time series which have two gain segments within 2 years of the end of the disturbance, 
-  #     #   takes the gain segment with the newest start date
-  #     gainIndex2 = gainIndex2[which.max(dates[DBEST_object$Start[gainIndex2]])] 
-  #   }
-  #   gainSegEndDate = dates[DBEST_object$End[gainIndex2]]
-  #   gainSegEndIndex = DBEST_object$End[gainIndex2]
-  # }
-  
-  DistStartY = as.double(substr(as.character.Date(distSegStartDate), start = 0, stop = 4))
-  
-  distEndYindex = DBEST_object$End[distIndex] # Recovery min
-  recovMin = as.double(DBEST_object$Fit[distEndYindex])
+  gainSegStartIndex = DBEST_object$Start[gainIndex]
 
-  recovMax = as.double(DBEST_object$Fit[gainSegEndIndex]) # recovery max
-  
-  recoveryMag = as.double(recovMax - recovMin) # Recvoery magnitude
-  
-  Y2R = as.double(gainSegEndIndex - distEndYindex) # Years to recovery
-  
-  recovSlope = as.double(recoveryMag / Y2R) # Recovery slope
-  
-  gapInGainLoss = as.double(DBEST_object$Start[gainIndex] - DBEST_object$End[distIndex]) # Gap between the end of the disturbance segment and the start of the gain segment
-  
-  RMSE = sqrt(mean((DBEST_object$Fit - DBEST_object$Data)^2))
-  
-  ## Adding recovery metrics to an array to be returned from the function
-  rMetricsArray = c(DistStartY,recovMin,recovMax,recoveryMag,Y2R,recovSlope)
-  
-  ## Adding auxiliary data to dataframe
-  auxSegArray = c(DBEST_object$Start[distIndex],DBEST_object$End[distIndex],DBEST_object$Start[gainIndex],gainSegEndIndex,gapInGainLoss,RMSE)
-  
   ## Adding a statement to remove data from bad time series
   # i.e time series with no gain, no loss, or only one segment
   if ((length(changeSeg_VIdif) <= 1) |
@@ -238,71 +133,164 @@ calcRecoveryMetrics = function(DBEST_object, index) {
       (length(changeSeg_VIdif[changeSeg_VIdif > 0]) == 0) |
       (length(gainIndex) == 0)
       ) {
-    rMetricsArray = rep(NA,8)
+    rMetricsArray = rep(NA,13)
     auxSegArray = rep(NA,6)
   } else {
-    preDistMean = as.double(mean(DBEST_object$Data[0:DBEST_object$Start[distIndex]])) # Pre-disturbance mean VI value
-    PostDistMean = as.double(mean(DBEST_object$Data[DBEST_object$End[distIndex]:length(dates)])) # Post-disturbance mean VI value
-    rMetricsArray = append(rMetricsArray,c(preDistMean,PostDistMean)) # These have to be calculated seperately, since their indexing data
+    # Calculating recovery metrics and segmentation outputs
+    ts_len = length(DBEST_object$Data)
+    
+    DistStartY = as.double(substr(as.character.Date(distSegStartDate), start = 0, stop = 4))
+    
+    recovMin = as.double(DBEST_object$Fit[distEndIndex]) # Recovery min
+    
+    recovMax = as.double(DBEST_object$Fit[gainSegEndIndex]) # Recovery max
+    
+    recoveryMag = as.double(recovMax - recovMin) # Recovery magnitude
+    
+    # Using Max() and Min() in these calculations to enable the 5 year calculation period without going out of range of the dataset
+    preDistMean = as.double(mean(DBEST_object$Data[max(1,(distStartIndex-5)):distStartIndex])) # Pre-disturbance mean VI value
+    PostRecovMean = as.double(mean(DBEST_object$Data[gainSegEndIndex:min(gainSegEndIndex+5,ts_len)])) # Post-recovery mean VI value
+    
+    distMag = as.double(preDistMean - DBEST_object$Data[distEndIndex]) # Disturbance magnitude
+    
+    Y2R = as.double(gainSegEndIndex - distEndIndex) # Years to recovery
+    
+    recovSlope = as.double(recoveryMag / Y2R) # Recovery slope
+    
+    NBR_year3 = as.double(DBEST_object$Data[(min((distEndIndex+3),ts_len))]) # absolute NBR value at 3,5,7,10 years post disturbance
+    NBR_year5 = as.double(DBEST_object$Data[(min((distEndIndex+5),ts_len))])
+    NBR_year7 = as.double(DBEST_object$Data[(min((distEndIndex+7),ts_len))])
+    NBR_year10 = as.double(DBEST_object$Data[(min((distEndIndex+10),ts_len))])
+    
+    gapInGainLoss = as.double(DBEST_object$Start[gainIndex] - DBEST_object$End[distIndex]) # Gap between the end of the disturbance segment and the start of the gain segment
+    
+    RMSE = sqrt(mean((DBEST_object$Fit - DBEST_object$Data)^2))
+    
+    ## Adding recovery metrics to an array to be returned from the function
+    rMetricsArray = c(DistStartY,recovMin,recovMax,recoveryMag,distMag,Y2R,recovSlope,NBR_year3,NBR_year5,NBR_year7,NBR_year10)
+    
+    ## Adding auxiliary data to dataframe
+    auxSegArray = c(DBEST_object$Start[distIndex],DBEST_object$End[distIndex],DBEST_object$Start[gainIndex],gainSegEndIndex,gapInGainLoss,RMSE)
+    
+    rMetricsArray = append(rMetricsArray,c(preDistMean,PostRecovMean)) # These have to be calculated seperately, since their indexing data
     }                                                                   # if a time series doesn't have a gain or loss it'll crash without this 
   
   return(list(rMetricsArray,auxSegArray))
 
 }
 
-### Experimental function, finding the confidence of the segmentation ###
+# Storing the max and min values of the input vegetation index / band, to be used to scale DBEST
+VImax = max(TS_DF[2:length(TS_DF[1,])],na.rm = TRUE)
+VImin = min(TS_DF[2:length(TS_DF[1,])],na.rm = TRUE)
+span = VImax - VImin
 
-DBEST_rep = function(inputZooTS, numIterations) {
+## Function to plot the DBEST output correctly
+plot_DBEST = function(DBEST_object,index,metricDF,auxDF,minVIval) {
+  # getting output device set up
+  svg(filename = paste('C:/R_workspace/images/ClearCutPlotsOnly/plot_',index,'_TimeSeriesGraph.svg',sep = ''),
+      width = 4,
+      height = 2,
+      pointsize = 4,
+      onefile = FALSE
+  )
   
-  segStarts = matrix(nrow = numIterations, ncol = 3) # segments start index
+  stableColor = "#3B999B"
+  # plotting the generalization lines furthest back
+  plot.default(dates,as.vector(DBEST_object$Fit),
+               type = 'l',
+               xlab = 'YEAR',
+               ylab = 'NBR',
+               main = paste("DBEST Result : Stand #",index,sep = ""),
+               lwd = 3,
+               col = stableColor,
+               ylim = c(VImin,VImax),
+               axes = FALSE,
+  )
   
-  segEnds = matrix(nrow = numIterations, ncol = 3) # segments end index
+  # getting axes customized
+  box()
+  axis.Date(1,at = seq(from = (startDate+365), to = endDate, by = '5 years'),labels = TRUE)
+  axis(2)
   
-  fits = matrix(nrow = numIterations, ncol = 38) # fit data values
-  
-  parameterMatrix = matrix(nrow = numIterations, ncol = 5) # Recording the parameter values
-  
-  for (rep in seq(1,numIterations)) {
-    
-    firstLS = runif(1,0.10,0.50)
-    secondLS = runif(1,0.15,0.55)
-    dur = round(runif(1,2,10),digits = 0)
-    dist = runif(1,0.01,0.20)
-    
-    iterationOut = DBEST(data = ts1,
-                         data.type = 'non-cyclical',
-                         algorithm = "change detection",
-                         breakpoints.no = 3,
-                         first.level.shift = firstLS,
-                         second.level.shift = secondLS,
-                         duration = dur,
-                         distance.threshold = dist,
-                         alpha = 0.05,
-                         plot = 'off'
+  distColor = '#EE5873'
+  # adding lines for the disturbance segments
+  for (i in c(1,3)) {
+    segments(x0 = dates[auxDF[index+1,i]],
+             y0 = DBEST_object$Fit[auxDF[index+1,i]],
+             x1 = dates[auxDF[index+1,i+1]],
+             y1 = DBEST_object$Fit[auxDF[index+1,i+1]],
+             col = distColor,
+             lty = 1,
+             lwd = 3
     )
-    
-    RMSE = sqrt(mean((iterationOut$Fit - iterationOut$Data)^2))
-    parameterMatrix[rep,] = c(firstLS,secondLS,dur,dist,RMSE)
-    
-    startsArray = iterationOut$Start
-    endsArray = iterationOut$End
-    fitsArray = iterationOut$Fit
-    while (length(startsArray) < 3) {
-      endsArray = append(endsArray,NA)
-      startsArray = append(startsArray,NA)
-    }
-    segStarts[rep,] = sort(startsArray, na.last = TRUE)
-    segEnds[rep,] = sort(endsArray, na.last = TRUE)
-    fits[rep,] = fitsArray
   }
-  return(list(segStarts,segEnds,fits,parameterMatrix))
-}
-
-# Also a function to calculate the mode #
-# Create the function.
-getmode <- function(v) {
-  uniqv <- unique(v)
-  uniqv[which.max(tabulate(match(v, uniqv)))]
+  
+  # adding the original data last
+  # raw time-series from original dataframe
+  rawValues = as.numeric(as.vector(TS_DF[(index+1),2:length(TS_DF)]))
+  # adding to plot
+  lines(dates,as.vector(rawValues),
+        col = 'black',
+        lwd = 1,
+        lty = 2
+  )
+  
+  # adding bar to indicate disturbance duration
+  segments(x0 = dates[auxDF[index+1,2]],
+           y0 = minVIval,
+           x1 = dates[auxDF[index+1,4]],
+           y1 = minVIval,
+           col = 'red',
+           lty = 1,
+           lwd = 4.5
+  )
+  
+  # adding text to the graph for the disturbance duration
+  text(x = dates[round((mean(c(auxDF[index+1,2],auxDF[index+1,4]))),digits = 0)],
+       y = (minVIval + abs(minVIval*0.1)),
+       labels = paste(as.character(metricDF$Y2R[index+1]),'Year Recovery'),
+       adj = 0.5
+  )
+  
+  # adding lines to indicate pre-disturbance and post-recovery means
+  # abline(h = metricDF$pre_CutMean[(index+1)],
+  #        col = 'azure3',
+  #        lty = 3,
+  #        lwd = 1
+  #        )
+  # abline(h = metricDF$post_CutMean[(index+1)],
+  #        col = 'azure4',
+  #        lty = 3,
+  #        lwd = 1
+  # )
+  
+  # recovery min / max indicators on axis
+  points(x = c(as.Date(as.yearmon(dates[1]) -0.95, frac = 1),
+               as.Date(as.yearmon(dates[1]) -0.99, frac = 1)
+  ),
+  y = c(metricDF[index+1,2],
+        metricDF[index+1,3]
+  ),
+  col = c('orange','green'),
+  pch = '-',
+  cex = 4
+  )
+  
+  
+  # adding a legend
+  legend(x = dates[(length(dates)-8)],
+         y = -0.1,
+         legend = c('Original Time-series','DBEST Generalization','Disturbance Event','Recovery Min','Recovery Max'),
+         col = c('black',stableColor,distColor,'orange','green'),
+         lty = c(2,1,1,NA,NA),
+         pch = c(NA,NA,NA,'-','-'),
+         pt.cex = c(NA,NA,NA,4,4),
+         lwd = c(1,2,2,NA,NA),
+         bg = 'light grey'
+  )
+  
+  # closing the graphical device
+  dev.off()
 }
 
 # implimenting DBEST, plotting results, and storing recovery metrics
@@ -310,71 +298,32 @@ getmode <- function(v) {
 for (i in TS_DF$X) {
   
   ## creating the time series object
-  NDVIvals1 = as.numeric(as.vector(TS_DF[(i+1),2:length(TS_DF)]))
+  NBRvals = as.numeric(as.vector(TS_DF[(i+1),2:length(TS_DF)]))
   
-  ts1 = zoo(x = NDVIvals1,order.by = dates)
+  ts1 = zoo(x = NBRvals,order.by = dates)
+  ts1 = na.locf(ts1, na.rm = FALSE, fromLast = TRUE) # filling in end values
+  ts1 = na.locf(ts1, na.rm = FALSE, fromLast = FALSE)
   
-  #repList = DBEST_rep(ts1,50) # repeatly trying out randomly selected parameter values for segmentation
-  # 
-  # #### test plotting to visualize the variations in segmentation ####
-  # 
-  # 
-  # plot.default(repList[[3]][1,],type = 'l', ylim = c(-0.2,1))
-  # for (n in seq(2,50)) {
-  #   lines(repList[[3]][n,])
-  # }
-  # points(x = repList[[1]], y = coredata(ts1)[repList[[1]]],
-  #        col = 'green', cex = 2.0)
-  # points(x = repList[[2]], y = coredata(ts1)[repList[[2]]],
-  #        col = 'red')
-  # lines(coredata(ts1),col = 'blue')
-  # 
-  # # Trying out a mean annual VI value
-  # meanValues = c()
-  # for (year in seq(1,50)) {
-  #   yearVals = repList[[3]][,year]
-  #   meanVal = mean(yearVals)
-  #   meanValues = append(meanValues,meanVal)
-  # }
-  # lines(x = seq(1,37),y = meanValues, col = 'red')
-  # 
-  # # trying out a majority vote for segment starts and ends
-  # majorityStarts = c()
-  # for (segN in seq(1,3)) {
-  #   start = getmode(repList[[1]][,segN])
-  #   majorityStarts[segN] = start
-  # }
-  # majorityEnds = c()
-  # for (segN in seq(1,3)) {
-  #   end = getmode(repList[[2]][,segN])
-  #   majorityEnds[segN] = end
-  # }
-  # plot.default(coredata(ts1),col = 'blue', type = 'l')
-  # # adding lines for the disturbance segments
-  # for (v in c(1,2,3)) {
-  #   segments(x0 = majorityStarts[v],
-  #            y0 = coredata(ts1)[majorityStarts[v]],
-  #            x1 = majorityEnds[v],
-  #            y1 = coredata(ts1)[majorityEnds[v]],
-  #            col = 'yellow',
-  #            lty = 1,
-  #            lwd = 3
-  #   )
-  # }
-  # 
-  # # trying out a matching approach which finds the total number of
-  # #   unique start and end combinations
-  # uniqueStarts = unique(repList[[1]])
-  # uniqueEnds = unique(repList[[2]])
+  generalized = DBEST(data = ts1,
+                 data.type = 'non-cyclical',
+                 algorithm = "generalization",
+                 breakpoints.no = 4,
+                 first.level.shift = (span*0.15),
+                 second.level.shift = (span*0.20),
+                 duration = 5,
+                 distance.threshold = 'default',
+                 alpha = 0.05,
+                 plot = 'off'
+  )
 
-  output = DBEST(data = ts1,
+  output = DBEST(data = generalized$Fit,
                   data.type = 'non-cyclical',
                   algorithm = "change detection",
                   breakpoints.no = 4,
-                  first.level.shift = 0.20,
-                  second.level.shift = 0.30,
+                  first.level.shift = (span*0.30),
+                  second.level.shift = (span*0.35),
                   duration = 5,
-                  distance.threshold = 0.15,
+                  distance.threshold = (span*0.10),
                   alpha = 0.05,
                   plot = 'off'
   )
@@ -385,39 +334,217 @@ for (i in TS_DF$X) {
   auxSegData[(i+1),] = listOfArrays[[2]]
   
   # Plotting
-  plot_DBEST(output,i,rMetrics,auxSegData)
-  
-  cat("Plot #",i,'\n',
-      "Year of disturbance :",rMetrics$'YearOfCut'[i],'\n',
-      'direction / magnitude :',output$Change,'\n',
-      'Start Years :', format(dates[output$Start], '%Y'),'\n',
-      "durations :", output$Duration,'\n',
-      '(0) = no abrupt, (1) = abrupt :', output$ChangeType,'\n',
-      sep = ' '
-      )
+  plot_DBEST(output,i,rMetrics,auxSegData,VImin) ##### rerun when needed #####
+
+  cat("Stand #",i, "complete","\n")
 }
 
-write.csv(rMetrics,file = "RecoveryMetrics_output.csv", )
-
-### Post Segmentation evaluation of the time series data / metrics ###
+#### Post Segmentation evaluation of the time series data / metrics ####
 # need to add the identifier as a column for tracking things during filtering
 rMetrics$'UniqueID' = row.names(rMetrics)
 rMetrics$'K_shift' = rMetrics$post_CutMean - rMetrics$pre_CutMean
 auxSegData$'UniqueID' = row.names(rMetrics)
+auxSegData$'DistDuration' = auxSegData$DistEndIndex - auxSegData$DistStartIndex
 
+# Experimenting with other recovery
+
+rMetrics$'recovPcent3y' = (rMetrics$NBRy3 - rMetrics$Recovery_min) / (abs(rMetrics$Disturbance_mag)) * 100
+rMetrics$'recovPcent5y' = (rMetrics$NBRy5 - rMetrics$Recovery_min) / (abs(rMetrics$Disturbance_mag)) * 100
+rMetrics$'recovPcent7y' = (rMetrics$NBRy7 - rMetrics$Recovery_min) / (abs(rMetrics$Disturbance_mag)) * 100
+rMetrics$'recovPcent10y' = (rMetrics$NBRy10 - rMetrics$Recovery_min) / (abs(rMetrics$Disturbance_mag)) * 100
+
+# A function that finds index values for 3, 5, 7, 10 years post disturbance for a single stand
+returnSyncVIs = function(standID,VItext,ts_length,sumMetric = FALSE) {
+  VI_values = get(paste(VItext,'_DF',sep = ''))[which(get(paste(VItext,'_DF',sep = ''))[,1] == standID),2:length(get(paste(VItext,'_DF',sep = ''))[1,])]
+  segmentationInfo = auxSegData[which(auxSegData$UniqueID == standID),]
+  if (sumMetric == FALSE){
+  
+    if (length(VI_values) == 38) {
+      
+      timeSeries = zoo(x = as.numeric(VI_values),order.by = dates)
+      timeSeries = na.locf(timeSeries, na.rm = FALSE, fromLast = TRUE) # filling in end values
+      timeSeries = na.locf(timeSeries, na.rm = FALSE, fromLast = FALSE)
+  
+      VI_year3 = as.numeric(timeSeries[(min((segmentationInfo$DistEndIndex+3),ts_length))])
+      VI_year5 = as.numeric(timeSeries[(min((segmentationInfo$DistEndIndex+5),ts_length))])
+      VI_year7 = as.numeric(timeSeries[(min((segmentationInfo$DistEndIndex+7),ts_length))])
+      VI_year10 = as.numeric(timeSeries[(min((segmentationInfo$DistEndIndex+10),ts_length))])
+      
+    } else if (length(VI_values) < 38){
+      
+      startY = substr(colnames(VI_values)[1],start = 2, stop = 5)
+      endY = substr(colnames(VI_values)[length(colnames(VI_values))],start = 2, stop = 5)
+      holder = as.vector(rep(NA,ts_length))
+      timeSeries = zoo(x = holder,order.by = dates)
+      startIndex = match(startY,year(timeSeries))
+      endIndex = match(endY,year(timeSeries))
+      timeSeries[startIndex:endIndex] = as.numeric(VI_values)
+  
+      VI_year3 = as.numeric(timeSeries[(min((segmentationInfo$DistEndIndex+3),ts_length))])
+      VI_year5 = as.numeric(timeSeries[(min((segmentationInfo$DistEndIndex+5),ts_length))])
+      VI_year7 = as.numeric(timeSeries[(min((segmentationInfo$DistEndIndex+7),ts_length))])
+      VI_year10 = as.numeric(timeSeries[(min((segmentationInfo$DistEndIndex+10),ts_length))])
+      
+    } else {
+      cat('Please use time series less than or equal to 38 years')
+    }
+  } else if (is.na(segmentationInfo$fitRMSE) == FALSE) {
+    
+    startY = substr(colnames(VI_values)[1],start = 1, stop = 5)
+    endY = substr(colnames(VI_values)[length(colnames(VI_values))],start = 1, stop = 5)
+    holder = as.vector(rep(NA,ts_length))
+    timeSeries = zoo(x = holder,order.by = dates)
+    startIndex = match(startY,year(timeSeries))
+    endIndex = match(endY,year(timeSeries))
+    timeSeries[startIndex:endIndex] = as.numeric(VI_values)
+    
+    VI_year3 = as.numeric(sum(timeSeries[segmentationInfo$DistEndIndex:(min((segmentationInfo$DistEndIndex+3),ts_length))],na.rm = TRUE))
+    VI_year5 = as.numeric(sum(timeSeries[segmentationInfo$DistEndIndex:(min((segmentationInfo$DistEndIndex+5),ts_length))],na.rm = TRUE))
+    VI_year7 = as.numeric(sum(timeSeries[segmentationInfo$DistEndIndex:(min((segmentationInfo$DistEndIndex+7),ts_length))],na.rm = TRUE))
+    VI_year10 = as.numeric(sum(timeSeries[segmentationInfo$DistEndIndex:(min((segmentationInfo$DistEndIndex+10),ts_length))],na.rm = TRUE))
+  } else {
+    VI_year3 = NA
+    VI_year5 = NA
+    VI_year7 = NA
+    VI_year10 = NA
+  }
+  return(c(VI_year3,VI_year5,VI_year7,VI_year10))
+}
+
+rMetrics$'EVI2y3' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'EVI2y5' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'EVI2y7' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'EVI2y10' = rep(NA,length(rMetrics$UniqueID))
+
+rMetrics$'B5y3' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'B5y5' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'B5y7' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'B5y10' = rep(NA,length(rMetrics$UniqueID))
+
+rMetrics$'TCCy3' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'TCCy5' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'TCCy7' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'TCCy10' = rep(NA,length(rMetrics$UniqueID))
+
+rMetrics$'freezeDaysy3' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'freezeDaysy5' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'freezeDaysy7' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'freezeDaysy10' = rep(NA,length(rMetrics$UniqueID))
+
+rMetrics$'GDDy3' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'GDDy5' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'GDDy7' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'GDDy10' = rep(NA,length(rMetrics$UniqueID))
+
+rMetrics$'meanVPDy3' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'meanVPDy5' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'meanVPDy7' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'meanVPDy10' = rep(NA,length(rMetrics$UniqueID))
+
+rMetrics$'totalPrecipy3' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'totalPrecipy5' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'totalPrecipy7' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'totalPrecipy10' = rep(NA,length(rMetrics$UniqueID))
+
+rMetrics$'meanTempy3' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'meanTempy5' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'meanTempy7' = rep(NA,length(rMetrics$UniqueID))
+rMetrics$'meanTempy10' = rep(NA,length(rMetrics$UniqueID))
+
+# rMetrics$'sznLengthy3' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'sznLengthy5' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'sznLengthy7' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'sznLengthy10' = rep(NA,length(rMetrics$UniqueID))
+# 
+# rMetrics$'midSznLengthy3' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'midSznLengthy5' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'midSznLengthy7' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'midSznLengthy10' = rep(NA,length(rMetrics$UniqueID))
+# 
+# rMetrics$'peakDayy3' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'peakDayy5' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'peakDayy7' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'peakDayy10' = rep(NA,length(rMetrics$UniqueID))
+# 
+# rMetrics$'EVI2areay3' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'EVI2areay5' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'EVI2areay7' = rep(NA,length(rMetrics$UniqueID))
+# rMetrics$'EVI2areay10' = rep(NA,length(rMetrics$UniqueID))
+
+for (standNum in rMetrics$UniqueID) {
+    for (VI in c('EVI2','B5','TCC')) {
+      output = returnSyncVIs(standNum, VI, 38)
+      startCol = match(paste(VI,'y3',sep = ''),colnames(rMetrics))
+      endCol = startCol + 3
+      standIndex = which(rMetrics$UniqueID == standNum)
+      rMetrics[standIndex,startCol:endCol] = output
+  }
+}
+
+for (standNum in rMetrics$UniqueID) {
+  for (VI in c('freezeDays','GDD','meanVPD','totalPrecip','meanTemp')) {
+    output = returnSyncVIs(standNum, VI, 38, TRUE)
+    startCol = match(paste(VI,'y3',sep = ''),colnames(rMetrics))
+    endCol = startCol + 3
+    standIndex = which(rMetrics$UniqueID == standNum)
+    rMetrics[standIndex,startCol:endCol] = output
+  }
+}
+
+### Adding in the temporal change in these metrics ###
+
+rMetrics$'freezeDaysChange' = apply(freezeDays_DF[34:39], MARGIN = 1,FUN = mean) - apply(freezeDays_DF[2:7], MARGIN = 1,FUN = mean)
+rMetrics$'GDDChange' = apply(GDD_DF[34:39], MARGIN = 1,FUN = mean) - apply(GDD_DF[2:7], MARGIN = 1,FUN = mean)
+rMetrics$'meanVPDChange' = apply(meanVPD_DF[34:39], MARGIN = 1,FUN = mean) - apply(meanVPD_DF[2:7], MARGIN = 1,FUN = mean)
+rMetrics$'totalPrecipChange' = apply(totalPrecip_DF[34:39], MARGIN = 1,FUN = mean) - apply(totalPrecip_DF[2:7], MARGIN = 1,FUN = mean)
+rMetrics$'meanTempChange' = apply(meanTemp_DF[34:39], MARGIN = 1,FUN = mean) - apply(meanTemp_DF[2:7], MARGIN = 1,FUN = mean)
+
+#plottingDF$'meanTempChange'
+
+rMetrics$'NonPSAy3' = atan2(rMetrics$EVI2y3,rMetrics$B5y3)
+rMetrics$'NonPSAy5' = atan2(rMetrics$EVI2y5,rMetrics$B5y5)
+rMetrics$'NonPSAy7' = atan2(rMetrics$EVI2y7,rMetrics$B5y7)
+rMetrics$'NonPSAy10' = atan2(rMetrics$EVI2y10,rMetrics$B5y10)
+
+# export table I can add back into arcgis pro
+exportDF = rMetrics[,c(14,32:length(colnames(rMetrics)))]
+write.csv(exportDF,file = "additionalVIvals2.csv")
+
+write.csv(rMetrics,file = "RecoveryMetrics_output.csv")
+
+#### Cleaning data based on practical relationships ####
+
+# Number of TS which did not have qualifying segments for metric calculation
 areNAindicies = which(is.na(rMetrics$Y2R) == TRUE)
+areNAstands = rMetrics$UniqueID[areNAindicies]
 
+# Number of TS which had large gaps between disturbance and recovery segments
 bigGapIndices = which(auxSegData$gainLossGap > 3)
 bigGapLengths = auxSegData$gainLossGap[bigGapIndices]
+bigGapStands = auxSegData$UniqueID[bigGapIndices]
 
-totalNumberOfBadDataPoints = length(bigGapIndices) + length(areNAindicies)
-cat("Number of bad time series :",totalNumberOfBadDataPoints)
+# Number of TS which had disturbances lasting longer than three years
+longDistStands = auxSegData$UniqueID[which(auxSegData$DistDuration > 3)]
+
+# Number of TS which had a recovery within 2 years or less
+shortRecovStands = rMetrics$UniqueID[which(rMetrics$Y2R <=2)]
+
+# An array which will hold all UniqueID's of stands removed from statistics
+badStands = sort(as.numeric(unique(c(areNAstands,bigGapStands,longDistStands,shortRecovStands))),decreasing = FALSE)
+
+# trying out an outlier test
+findExtremeStands = function(metricValues,IDs,c){
+  stats = summary(metricValues)
+  anIQR = IQR(metricValues, na.rm = TRUE)
+  lower = stats[2] - (c*anIQR)
+  upper = stats[5] + (c*anIQR)
+  indices = which(metricValues > upper | metricValues < lower)
+  return(IDs[indices])
+} # can use either 1 or 3 for c (3 for extreme values)
 
 ## Creating a new dataframe with only good values
 goodDataDF = rMetrics[which(is.na(rMetrics$YearOfCut) == FALSE),]
 goodDataDF$fit_RMSE = auxSegData$fitRMSE[which(is.na(auxSegData$DistStartIndex) == FALSE)]
-
-auxSegData$'DistDuration' = auxSegData$DistEndIndex - auxSegData$DistStartIndex
 
 for (ID in goodDataDF$UniqueID) {
   gapLength = auxSegData$gainLossGap[which(auxSegData$UniqueID == ID)]
@@ -429,20 +556,149 @@ for (ID in goodDataDF$UniqueID) {
   }
 } # removing stands with large gaps between disturbance end and recovery start
 
+# # Copying only the good files into a seperate directory within all the plot images folder
+# allPlotsDirPath = "C:/R_workspace/images/ClearCutPlotsOnly"
+# goodDirPath = "C:/R_workspace/images/ClearCutPlotsOnly/CleanedData"
+# for (standI in goodDataDF$UniqueID){
+#   filePath = paste('plot_',standI,'_TimeSeriesGraph.svg',sep = '')
+#   file.copy(from = paste(allPlotsDirPath,'/',filePath, sep = ''),
+#             to = goodDirPath,
+#             overwrite = TRUE,
+#             recursive = FALSE,
+#             copy.mode = TRUE,
+#             copy.date = TRUE
+#         )
+# }
 
 # merging the ecoregion info and good data for plotting #
 ecoRegionInfo$intLat = floor(ecoRegionInfo$lat)
+ecoRegionInfo$ownership_mode = replace_na(ecoRegionInfo$ownership_mode,999)
+ecoRegionInfo$ownership_mode = as.factor(ecoRegionInfo$ownership_mode)
 plottingDF = merge(x = goodDataDF,
                    y = ecoRegionInfo,
                    by.x = 'UniqueID',
-                   by.y = 'X'
+                   by.y = 'UniqueID',
+                   all.x = TRUE
                    )
+# Setting some of the categorical data columns to be factors #
+plottingDF$aspect_mode = as.factor(plottingDF$aspect_mode)
+plottingDF$soil0_mode = as.factor(plottingDF$soil0_mode)
+plottingDF$soil30_mode = as.factor(plottingDF$soil30_mode)
+plottingDF$soil100_mode = as.factor(plottingDF$soil100_mode)
+plottingDF$ecoR_code = as.character(plottingDF$Classified)
+
+write.csv(plottingDF,file = "RecoveryMetrics_output.csv")
+
+#### Experimenting with CART analysis ####
+library(rpart)
+library(rpart.plot)
+library(ranger)
+
+# Model formula
+formulaString = "K_shift ~ aspect_mode + elevation_mean + slope_mean + soil0_mode + soil30_mode + soil100_mode + pH30_mean + intLat + ecoR_code + ownership_mode + freezeDaysy3 + freezeDaysy5 + freezeDaysy7 + freezeDaysy10 + GDDy3 + GDDy5 + GDDy7 + GDDy10 + meanVPDy3 + meanVPDy5 + meanVPDy7 + meanVPDy10 + totalPrecipy3 + totalPrecipy5 + totalPrecipy7 + totalPrecipy10 + meanTempy3 + meanTempy5 + meanTempy7 + meanTempy10 + freezeDaysChange + GDDChange + meanVPDChange + totalPrecipChange + meanTempChange"
+
+# # Seperating train from test data 70% train, 30% test
+# trainIndices = sample(x = (1:length(plottingDF$UniqueID)), size = (0.7*length(plottingDF$UniqueID)))
+# trainData = plottingDF[trainIndices,]
+# testIndices = (1:length(plottingDF$UniqueID))[-trainIndices]
+# testData = plottingDF[testIndices,]
+
+# Fitting the regression tree
+CART_fit = rpart(formula = formulaString,
+              data = plottingDF,
+              method = 'anova',
+              control = rpart.control(maxdepth = 10,
+                                      minsplit = 100,
+                                      minbucket = 50,
+                                      xval = 10,
+                                      cp = 0
+                                      )
+              )
+# Finding the lowest cp value within 1SE of the lowest cross validated error
+lowERRcpI = as.numeric(which.min(CART_fit$cptable[,4]))
+optimumCP = which(CART_fit$cptable[,4] <= (CART_fit$cptable[lowERRcpI,4] + CART_fit$cptable[lowERRcpI,5]))
+optimumCP = as.double(CART_fit$cptable[min(optimumCP),1])
+
+CART_test = rpart.predict(CART_fit, type = 'matrix')
+
+# Going to look at the highest residuals from this model
+CARTResids = sort(abs(residuals(CART_fit)),decreasing = TRUE)
+residQs = quantile(CARTResids,c(0.80,0.85,0.90,0.95))
+Qresids = CARTResids[which(CARTResids >= residQs[4])]
+residsI = as.numeric(names(Qresids))
+residsStands = plottingDF$UniqueID[residsI]
+
+# # Testing the regression tree
+# CART_test = rpart.predict(object = CART_fit,
+#                           type = 'matrix',
+#                           newdata = testData
+#                           )
+
+# # RMSE of the test fit
+# CART_rmse = sqrt(mean((CART_test - testData$K_shift)^2))
+# 
+# # Finding the number of splits with the lowest complexity
+# lowestCP = CART_fit$cptable[which.min(CART_fit$cptable[,'xerror']),'CP']
+
+# Pruning the tree to the lowest complexity parameter
+CART_fit2 = prune.rpart(CART_fit, cp = optimumCP)
+CART_test2 = rpart.predict(object = CART_fit2,
+                          type = 'matrix',
+                          newdata = testData
+)
+CART2_rmse = sqrt(mean((CART_test2 - testData$K_shift)^2))
+
+## Plotting variable importance
+data = sort(RF_1$variable.importance, decreasing = TRUE)
+varGraph = ggplot(mapping = aes(x = names(data), y = as.numeric(data))) +
+  geom_bar(width = 1, 
+           stat="identity",
+           colour = "black", 
+           fill="lightblue",
+           position = position_dodge()
+           ) +
+  coord_polar(theta = "x", start=0)+
+  labs(x = NULL,y = 'Variable Importance Metric')
+print(varGraph)
+
+### Trying out random forest ###
+RF_1 = ranger(formula = formulaString,
+              data = plottingDF[-146,],
+              num.trees = 2000,
+              importance = 'permutation',
+              max.depth = 15,
+              mtry = floor(35/3), # number of features / 3
+              replace = TRUE,
+              respect.unordered.factors = 'order',
+              oob.error = TRUE,
+              num.threads = 8,
+              write.forest = TRUE,
+              sample.fraction = 0.7
+              )
+
+#### Temporal trend analysis ####
+library(Kendall)
+
+yearsMedian = aggregate.data.frame(plottingDF$K_shift,
+                                   by = list(plottingDF$YearOfCut),
+                                   FUN = median,
+                                   simplify = TRUE
+                                   )
+
+trendTest = Kendall(yearsMedian$Group.1,yearsMedian$x)
+summary(trendTest)
+plot.default(yearsMedian$Group.1,yearsMedian$x)
+abline(0,0)
 
 #### new data visualization plotting methods ####
 
 # making a list of recovery metrics to plot
-metrics = c('Recovery_min','Recovery_max','Recovery_mag','Y2R',
-            'Recovery_slope','K_shift')
+metrics = c('Recovery_max','Recovery_mag','Recovery_slope','K_shift','Y2R','NonPSAy3','NonPSAy5','NonPSAy7','NonPSAy10')
+metrics = append(metrics,colnames(plottingDF)[match('recovPcent3y',colnames(plottingDF)) : match('B5y10',colnames(plottingDF))])
+metrics = append(metrics,colnames(plottingDF)[match('NBRy3',colnames(plottingDF)):match('NBRy10',colnames(plottingDF))])
+
+# path for export of stats plots
+statsPlotsPath = "C:/R_workspace/images/StatsPlots"
 
 #---------------- Ungrouped Stats plots for each metric ----------------------#
 # histograms
@@ -453,10 +709,15 @@ for (aMetric in metrics){
     #geom_vline(aes(xintercept = mean(aMetric)), color = 'red')
     labs(title = paste("Distribution of",aMetric, "Metric"))
     print(summaryStats)
+    ggsave(filename = paste(aMetric,'_histogram.svg',sep = ''),
+           plot = summaryStats,
+           device = 'svg',
+           path = statsPlotsPath
+           )
 }
 # boxplots
 # have to make a seperate DF for just the metrics for this one
-metricsDF = plottingDF %>% select(all_of(metrics[-4]))
+metricsDF = plottingDF %>% select(all_of(metrics[c(-5,-10,-11,-12,-13)]))
 summaryStats = ggplot(data = stack(metricsDF), 
                       aes(x = ind, y = values)
                       )+ 
@@ -464,28 +725,71 @@ summaryStats = ggplot(data = stack(metricsDF),
   #geom_vline(aes(xintercept = mean(aMetric)), color = 'red')
   labs(title = paste("Distribution of Selected Recovery Metrics"))+
   xlab(NULL)+
-  ylab("NBR Value")
+  ylab("NBR Value")+
+  theme(axis.text.x = element_text(angle = 20,vjust = 0.95,hjust = 0.9)
+  )
 print(summaryStats)
+ggsave(filename = 'selectMetricsBoxplots.svg',
+       plot = summaryStats,
+       device = 'svg',
+       path = statsPlotsPath
+      )
 
 #---------------- Stratifying by disturbance year ----------------------------#
 # Need to create a subset of the data that fall within the time window I want
-distWindowDF = plottingDF[which(plottingDF$YearOfCut >= 1994 & plottingDF$YearOfCut <= 2010),]
+distWindowDF = plottingDF[which(plottingDF$YearOfCut >= 1989 & plottingDF$YearOfCut <= 2011),]
 distWindowDF$YearOfCut = as.factor(distWindowDF$YearOfCut)
+distWindowDF$intLat =as.factor(distWindowDF$intLat)
+distWindowDF$'YearOfCutNUM' = as.numeric(distWindowDF$YearOfCut)
+
+eq <- function(x,y) {
+  m <- lm(y ~ x)
+  as.character(
+    as.expression(
+      substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2,
+                 list(a = format(coef(m)[1], digits = 4),
+                      b = format(coef(m)[2], digits = 4),
+                      r2 = format(summary(m)$r.squared, digits = 3)))
+    )
+  )
+}
 
 for (aMetric in metrics){
+  
+  columnIndex = which(colnames(distWindowDF) == aMetric)
+    
   yearsPlot = ggplot(data = distWindowDF, 
-                     aes_string(x = 'YearOfCut', y = aMetric,group = 1)
+                     aes_string(x = 'YearOfCut', y = aMetric,group = 1) #color = 'lat'
                      )+
     #geom_bin_2d(drop = FALSE)+
-    geom_point()+
+    geom_point(size = 2.5, shape = 4)+
     stat_smooth(size = 1.5,
-                method = 'loess',
-                span = 0.80,
-                show.legend = TRUE)+
+                method = 'lm',
+                se = TRUE,
+                n = 5,
+                show.legend = FALSE)+
     labs(title = paste("Variation in",aMetric,"by Disturbance Year")
          )+
-    xlab("Year of Disturbance")
-  print(yearsPlot)
+    xlab("Year of Disturbance")+
+    theme(axis.text.x = element_text(angle = 45,vjust = 0.95,hjust = 0.9), aspect.ratio = 4/8
+    )+
+    scale_colour_gradient(low = "#ffffcc",
+                          high = "#253494",
+                          space = "Lab",
+                          guide = "colourbar",
+                          aesthetics = c("colour","fill")
+    ) 
+    #geom_text(mapping = aes(x = 15,y = ),label = eq(distWindowDF$'YearOfCutNUM',distWindowDF[,columnIndex]), parse = TRUE)
+
+    print(yearsPlot)
+    ggsave(filename = paste(aMetric,'_temporalTrend.svg',sep = ''),
+           plot = yearsPlot,
+           device = 'svg',
+           path = statsPlotsPath,
+           width = 8,
+           height = 4,
+           limitsize = FALSE
+           )
 }
 
 #---------------- Stratifying by whole lattitudes ----------------------------#
@@ -505,7 +809,7 @@ for (aMetric in metrics){
 }
 
 #-------------------- Stratifying by Ecoregions ------------------------------#
-plottingDF$ecoR_code = as.character(plottingDF$ecoR_code)
+plottingDF$ecoR_code = as.character(plottingDF$Classified)
 for (aMetric in metrics){
   ecoRegionPlot = ggplot(data = plottingDF, 
                          aes_string(x = 'ecoR_code', y = aMetric, fill = 'ecoR_code')
@@ -517,6 +821,41 @@ for (aMetric in metrics){
     theme(axis.text.x = element_text(angle = 20,vjust = 0.95,hjust = 0.9), 
           legend.position = 'none'
           )+
-    scale_fill_brewer(palette = 'Set1')
+    scale_fill_brewer(palette = 'Paired')
   print(ecoRegionPlot)
 }
+
+#---------------- Looking at K-Shift by toil texture class -------------------#
+soilDF = plottingDF[-which(is.na(plottingDF$soil0_mode) == TRUE),]
+soilDF$K_shift = as.numeric(soilDF$K_shift)
+#plottingDF$soil0_mode = as.factor(plottingDF$soil0_mode)
+kshiftSoil = ggplot(data = soilDF, 
+                    mapping = aes(group = soilDF$soil30_mode, y = soilDF$K_shift)
+                    )+ 
+  geom_boxplot()+
+  #geom_vline(aes(xintercept = mean(aMetric)), color = 'red')
+  labs(title = paste("K-Shift Distribution by Soil Texture Class"))+
+  xlab(NULL)+
+  ylab("K-Shift Value (NBR)")+
+  theme(axis.text.x = element_text(angle = 20,vjust = 0.95,hjust = 0.9)
+  )
+print(kshiftSoil)
+
+# a function that will make it easier to look up stands in google earth
+
+GE_coords = function(standID) {
+  attributeEntry = ecoRegionInfo[which(ecoRegionInfo$UniqueID == standID),]
+  cat("Stand #",standID," : ",attributeEntry$lat,", ",attributeEntry$long, sep = "")
+}
+
+write.csv(plottingDF,file = "AllCleanedData_output.csv")
+
+# final printing of sources of removed stands from statistics
+totalNumberOfBadDataPoints = length(bigGapIndices) + length(areNAindicies) + length(longDistStands) + length(shortRecovStands)
+cat("Total Number of Bad time series :", length(badStands),"\n", 
+    "Unusable segmentation filter :", length(areNAindicies),"\n",
+    "Disturbance segment > 3 years :", length(bigGapIndices),"\n",
+    "Recovery segment <= 2 years :",length(shortRecovStands), "\n",
+    "Disturbance -> recovery gap > 3 years :",length(bigGapIndices),"\n",
+    "Good time series fit RMSE :", mean(plottingDF$fit_RMSE)
+    )
