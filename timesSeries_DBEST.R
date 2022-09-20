@@ -6,7 +6,7 @@ library(tidyverse)
 library(RColorBrewer)
 
 dataDate1 = "2022_06_30" # using for the latest version of the time series csv
-dataDate2 = "2022_08_01" # using for the latest version of the stand attribute dataset
+dataDate2 = "2022_08_12" # using for the latest version of the stand attribute dataset
 dataDate3 = "2022_08_04" # using for the latest version of the climate variables csv
 
 # Bringing in vegetation index time series
@@ -88,8 +88,11 @@ endDate = as.Date.character(endDate,format = '%Y-%m-%d')
 dates = seq(startDate,endDate, by = 'years')
 
 # Dataframe to store recovery metrics for each stand
-rMetrics <- data.frame(matrix(nrow = length(rownames(TS_DF)), ncol = 13,byrow = TRUE))
-colnames(rMetrics) = c('YearOfCut','Recovery_min','Recovery_max','Recovery_mag','Disturbance_mag','Y2R','Recovery_slope','NBRy3','NBRy5','NBRy7','NBRy10','pre_CutMean','post_CutMean')
+rMetrics <- data.frame(matrix(nrow = length(rownames(TS_DF)), ncol = 14,byrow = TRUE))
+colnames(rMetrics) = c('YearOfCut','Recovery_min','Recovery_max','Recovery_mag',
+                       'Disturbance_mag','Y2R_seg','Recovery_slope','NBRy3','NBRy5',
+                       'NBRy7','NBRy10','pre_CutMean','post_CutMean','Y2R_80'
+                       )
 rownames(rMetrics) = TS_DF$X
 
 # Dataframe to store auxiliary data for plotting (start dates for segments, etc.)
@@ -133,7 +136,7 @@ calcRecoveryMetrics = function(DBEST_object, index) {
       (length(changeSeg_VIdif[changeSeg_VIdif > 0]) == 0) |
       (length(gainIndex) == 0)
       ) {
-    rMetricsArray = rep(NA,13)
+    rMetricsArray = rep(NA,14)
     auxSegArray = rep(NA,6)
   } else {
     # Calculating recovery metrics and segmentation outputs
@@ -141,19 +144,22 @@ calcRecoveryMetrics = function(DBEST_object, index) {
     
     DistStartY = as.double(substr(as.character.Date(distSegStartDate), start = 0, stop = 4))
     
-    recovMin = as.double(DBEST_object$Fit[distEndIndex]) # Recovery min
+    recovMin = as.double(DBEST_object$Data[distEndIndex]) # Recovery min
     
-    recovMax = as.double(DBEST_object$Fit[gainSegEndIndex]) # Recovery max
+    recovMax = as.double(DBEST_object$Data[gainSegEndIndex]) # Recovery max
     
     recoveryMag = as.double(recovMax - recovMin) # Recovery magnitude
     
     # Using Max() and Min() in these calculations to enable the 5 year calculation period without going out of range of the dataset
     preDistMean = as.double(mean(DBEST_object$Data[max(1,(distStartIndex-5)):distStartIndex])) # Pre-disturbance mean VI value
-    PostRecovMean = as.double(mean(DBEST_object$Data[gainSegEndIndex:min(gainSegEndIndex+5,ts_len)])) # Post-recovery mean VI value
+    PostRecovMean = as.double(quantile(DBEST_object$Data[gainSegEndIndex:ts_len],c(0.85))) # Post-recovery mean VI value
     
     distMag = as.double(preDistMean - DBEST_object$Data[distEndIndex]) # Disturbance magnitude
     
     Y2R = as.double(gainSegEndIndex - distEndIndex) # Years to recovery
+    
+    Y2R80 = min(which(output$Data[distEndIndex:ts_len] >= (0.8*preDistMean))) - 1
+    Y2R80 = min(Y2R80,(ts_len-distEndIndex))
     
     recovSlope = as.double(recoveryMag / Y2R) # Recovery slope
     
@@ -172,7 +178,7 @@ calcRecoveryMetrics = function(DBEST_object, index) {
     ## Adding auxiliary data to dataframe
     auxSegArray = c(DBEST_object$Start[distIndex],DBEST_object$End[distIndex],DBEST_object$Start[gainIndex],gainSegEndIndex,gapInGainLoss,RMSE)
     
-    rMetricsArray = append(rMetricsArray,c(preDistMean,PostRecovMean)) # These have to be calculated seperately, since their indexing data
+    rMetricsArray = append(rMetricsArray,c(preDistMean,PostRecovMean,Y2R80)) # These have to be calculated seperately, since their indexing data
     }                                                                   # if a time series doesn't have a gain or loss it'll crash without this 
   
   return(list(rMetricsArray,auxSegArray))
@@ -248,11 +254,11 @@ plot_DBEST = function(DBEST_object,index,metricDF,auxDF,minVIval) {
   # adding text to the graph for the disturbance duration
   text(x = dates[round((mean(c(auxDF[index+1,2],auxDF[index+1,4]))),digits = 0)],
        y = (minVIval + abs(minVIval*0.1)),
-       labels = paste(as.character(metricDF$Y2R[index+1]),'Year Recovery'),
+       labels = paste(as.character(metricDF$Y2R_seg[index+1]),'Year Recovery'),
        adj = 0.5
   )
-  
-  # adding lines to indicate pre-disturbance and post-recovery means
+  # 
+  # # adding lines to indicate pre-disturbance and post-recovery means
   # abline(h = metricDF$pre_CutMean[(index+1)],
   #        col = 'azure3',
   #        lty = 3,
@@ -262,8 +268,15 @@ plot_DBEST = function(DBEST_object,index,metricDF,auxDF,minVIval) {
   #        col = 'azure4',
   #        lty = 3,
   #        lwd = 1
-  # )
-  
+  #        )
+  # 
+  # # adding line to show NBRy5 value
+  # segments(x0 = dates[(auxDF[[index+1,2]]+5)],
+  #          y0 = minVIval,
+  #          x1 = dates[(auxDF[[index+1,2]]+5)],
+  #          y1 = DBEST_object$Data[(auxDF[[index+1,2]]+5)]
+  #          )
+  # 
   # recovery min / max indicators on axis
   points(x = c(as.Date(as.yearmon(dates[1]) -0.95, frac = 1),
                as.Date(as.yearmon(dates[1]) -0.99, frac = 1)
@@ -293,6 +306,12 @@ plot_DBEST = function(DBEST_object,index,metricDF,auxDF,minVIval) {
   dev.off()
 }
 
+# a function that will make it easier to look up stands in google earth
+GE_coords = function(standID) {
+  attributeEntry = ecoRegionInfo[which(ecoRegionInfo$UniqueID == standID),]
+  cat("Stand #",standID," : ",attributeEntry$lat,", ",attributeEntry$long, sep = "")
+}
+
 # implimenting DBEST, plotting results, and storing recovery metrics
 
 for (i in TS_DF$X) {
@@ -319,7 +338,7 @@ for (i in TS_DF$X) {
   output = DBEST(data = generalized$Fit,
                   data.type = 'non-cyclical',
                   algorithm = "change detection",
-                  breakpoints.no = 4,
+                  breakpoints.no = 2,
                   first.level.shift = (span*0.30),
                   second.level.shift = (span*0.35),
                   duration = 5,
@@ -328,6 +347,11 @@ for (i in TS_DF$X) {
                   plot = 'off'
   )
   
+  # ### REMOVE WHEN DONE TESTING ###
+  # plot.default(ts1,type = 'l', col = 'black', ylim = c(-0.2,0.8))
+  # lines(generalized$Fit,type = 'l', col = 'blue')
+  # lines(output$Fit,type = 'l', col = 'red')
+
   # Calculate recovery metrics and auxilary data
   listOfArrays = calcRecoveryMetrics(output,i)
   rMetrics[(i+1),] = listOfArrays[[1]]
@@ -515,46 +539,69 @@ write.csv(rMetrics,file = "RecoveryMetrics_output.csv")
 #### Cleaning data based on practical relationships ####
 
 # Number of TS which did not have qualifying segments for metric calculation
-areNAindicies = which(is.na(rMetrics$Y2R) == TRUE)
+areNAindicies = which(is.na(rMetrics$Y2R_seg) == TRUE)
 areNAstands = rMetrics$UniqueID[areNAindicies]
 
 # Number of TS which had large gaps between disturbance and recovery segments
-bigGapIndices = which(auxSegData$gainLossGap > 3)
+bigGapIndices = which(auxSegData$gainLossGap > 5)
 bigGapLengths = auxSegData$gainLossGap[bigGapIndices]
 bigGapStands = auxSegData$UniqueID[bigGapIndices]
 
 # Number of TS which had disturbances lasting longer than three years
-longDistStands = auxSegData$UniqueID[which(auxSegData$DistDuration > 3)]
+longDistStands = auxSegData$UniqueID[which(auxSegData$DistDuration > 4)]
 
-# Number of TS which had a recovery within 2 years or less
-shortRecovStands = rMetrics$UniqueID[which(rMetrics$Y2R <=2)]
+# Experimental, there are many stands which because of segmentation or noise have longer disturbances
+#     seem to be able to keep the good ones by including a disturbance magnitude condition
+expFilter = auxSegData$UniqueID[which((auxSegData$DistDuration > 4) & (rMetrics$Disturbance_mag < 0.3))]
+
+# Removing low magnitude disturbance
+smalldist = rMetrics$UniqueID[which(rMetrics$Disturbance_mag < 0.20)]
+  
+# Going to remove stands that were probably not pine prior to disturbace
+hardwoodCNV = rMetrics$UniqueID[which(rMetrics$pre_CutMean < 0.20)]
+
+# Number of TS which had a recovery within 4 years or less
+shortRecovStands = rMetrics$UniqueID[which(rMetrics$Y2R_seg < 3)]
 
 # An array which will hold all UniqueID's of stands removed from statistics
 badStands = sort(as.numeric(unique(c(areNAstands,bigGapStands,longDistStands,shortRecovStands))),decreasing = FALSE)
+badStands2 = sort(as.numeric(unique(c(areNAstands,longDistStands,shortRecovStands,hardwoodCNV,smalldist))),decreasing = FALSE)
 
-# trying out an outlier test
-findExtremeStands = function(metricValues,IDs,c){
-  stats = summary(metricValues)
-  anIQR = IQR(metricValues, na.rm = TRUE)
-  lower = stats[2] - (c*anIQR)
-  upper = stats[5] + (c*anIQR)
-  indices = which(metricValues > upper | metricValues < lower)
-  return(IDs[indices])
-} # can use either 1 or 3 for c (3 for extreme values)
+# # trying out an outlier test
+# findExtremeStands = function(metricValues,IDs,c){
+#   stats = summary(metricValues)
+#   anIQR = IQR(metricValues, na.rm = TRUE)
+#   lower = stats[2] - (c*anIQR)
+#   upper = stats[5] + (c*anIQR)
+#   indices = which(metricValues > upper | metricValues < lower)
+#   return(IDs[indices])
+# } # can use either 1 or 3 for c (3 for extreme values)
 
 ## Creating a new dataframe with only good values
 goodDataDF = rMetrics[which(is.na(rMetrics$YearOfCut) == FALSE),]
 goodDataDF$fit_RMSE = auxSegData$fitRMSE[which(is.na(auxSegData$DistStartIndex) == FALSE)]
+# 
+# goodDataDF = goodDataDF[-which(goodDataDF$UniqueID == badStands2),]
 
-for (ID in goodDataDF$UniqueID) {
-  gapLength = auxSegData$gainLossGap[which(auxSegData$UniqueID == ID)]
-  distDuration = as.numeric(auxSegData$DistDuration[which(auxSegData$UniqueID == ID)])
-  recovDuration = goodDataDF$Y2R[goodDataDF$UniqueID == ID]
-  if ((gapLength > 3) | (distDuration > 3) | (recovDuration <=2)) {
-    indexValue = which(goodDataDF$UniqueID == ID)
-    goodDataDF = goodDataDF[-indexValue,]
+for (index in goodDataDF$UniqueID){
+  ID = as.numeric(index)
+  IDindex = which(goodDataDF$UniqueID == ID)
+  bool = ID %in% as.numeric(badStands2)
+  if (bool == TRUE){
+    goodDataDF = goodDataDF[-IDindex,]
   }
-} # removing stands with large gaps between disturbance end and recovery start
+}
+
+#### the above code is a much simplier and more transparent way of selecting the good stands
+# for (ID in goodDataDF$UniqueID) {
+#   gapLength = auxSegData$gainLossGap[which(auxSegData$UniqueID == ID)]
+#   distDuration = as.numeric(auxSegData$DistDuration[which(auxSegData$UniqueID == ID)])
+#   recovDuration = goodDataDF$Y2R[goodDataDF$UniqueID == ID]
+#   if ((distDuration > 3) | (recovDuration < 5)) {
+#     indexValue = which(goodDataDF$UniqueID == ID)
+#     goodDataDF = goodDataDF[-indexValue,]
+#   }
+# } # removing stands with large gaps between disturbance end and recovery start
 
 # # Copying only the good files into a seperate directory within all the plot images folder
 # allPlotsDirPath = "C:/R_workspace/images/ClearCutPlotsOnly"
@@ -569,6 +616,19 @@ for (ID in goodDataDF$UniqueID) {
 #             copy.date = TRUE
 #         )
 # }
+# 
+# # Copying only the bad stands graphs into a seperate directory within all the plot images folder
+# badDirPath = "C:/R_workspace/images/ClearCutPlotsOnly/BadStands"
+# for (standI in badStands2){
+#   filePath = paste('plot_',as.character(standI),'_TimeSeriesGraph.svg',sep = '')
+#   file.copy(from = paste(allPlotsDirPath,'/',filePath, sep = ''),
+#             to = badDirPath,
+#             overwrite = TRUE,
+#             recursive = FALSE,
+#             copy.mode = TRUE,
+#             copy.date = TRUE
+#   )
+# }
 
 # merging the ecoregion info and good data for plotting #
 ecoRegionInfo$intLat = floor(ecoRegionInfo$lat)
@@ -580,12 +640,34 @@ plottingDF = merge(x = goodDataDF,
                    by.y = 'UniqueID',
                    all.x = TRUE
                    )
+
+SSURGOdata = read.csv(file = 'allStandsSSURGOdata.csv')
+plottingDF = merge(x = plottingDF,
+                   y = SSURGOdata,
+                   by.x = 'UniqueID',
+                   by.y = 'UniqueID',
+                   all.x = TRUE
+)
+
+SCMCdata = read.csv(file = 'cleanedData_SCMC.csv')
+colnames(SCMCdata) = c('UniqueID','groupID','memProb')
+plottingDF = merge(x = plottingDF,
+                   y = SCMCdata,
+                   by.x = 'UniqueID',
+                   by.y = 'UniqueID',
+                   all.x = TRUE
+)
+
 # Setting some of the categorical data columns to be factors #
 plottingDF$aspect_mode = as.factor(plottingDF$aspect_mode)
 plottingDF$soil0_mode = as.factor(plottingDF$soil0_mode)
 plottingDF$soil30_mode = as.factor(plottingDF$soil30_mode)
 plottingDF$soil100_mode = as.factor(plottingDF$soil100_mode)
 plottingDF$ecoR_code = as.character(plottingDF$Classified)
+plottingDF$plantation_class = as.factor(plottingDF$plantation_class)
+plottingDF$soilGG_mode = as.factor(plottingDF$soilGG_mode)
+plottingDF$groupID = as.factor(plottingDF$groupID)
+plottingDF$'rel_Kshift' = ((plottingDF$post_CutMean - plottingDF$pre_CutMean) / plottingDF$pre_CutMean) * 100 #(plottingDF$post_CutMean / plottingDF$pre_CutMean) * 100 #
 
 write.csv(plottingDF,file = "RecoveryMetrics_output.csv")
 
@@ -593,9 +675,51 @@ write.csv(plottingDF,file = "RecoveryMetrics_output.csv")
 library(rpart)
 library(rpart.plot)
 library(ranger)
+library(lctools)
+library(dplyr)
+library(corrplot)
+
+# Looking at correlation matrix for all variables
+onlyNumeric = unlist(lapply(plottingDF, is.numeric))  
+correlationMatrix = cor(plottingDF[,onlyNumeric], 
+                        use = 'everything'
+                        )
+corrplot(correlationMatrix)
+
+# Determining spatial autocorrelation
+spatialWeights = w.matrix(Coords = data.frame(plottingDF$long,plottingDF$lat),
+                          Bandwidth = 50,
+                          WType = 'Binary',
+                          family = 'adaptive'
+                          )
+
+morans = moransI.w(plottingDF$K_shift,spatialWeights)
+
+localMorans = l.moransI(Coords = data.frame(plottingDF$long,plottingDF$lat),
+                        Bandwidth = 500,
+                        x = plottingDF$K_shift,
+                        WType = 'Binary',
+                        scatter.plot = TRUE,
+                        family = 'adpative'
+                        )
+
+plot.default(plottingDF$pre_CutMean, plottingDF$rel_Kshift, col = plottingDF$YearOfCut)
+testModel = lm(formula = 'rel_Kshift ~ pre_CutMean', data = log(plottingDF[,c('rel_Kshift', 'pre_CutMean')]))
+plot.default(plottingDF$rel_Kshift, exp(testModel$fitted.values))
+abline(0,1)
 
 # Model formula
-formulaString = "K_shift ~ aspect_mode + elevation_mean + slope_mean + soil0_mode + soil30_mode + soil100_mode + pH30_mean + intLat + ecoR_code + ownership_mode + freezeDaysy3 + freezeDaysy5 + freezeDaysy7 + freezeDaysy10 + GDDy3 + GDDy5 + GDDy7 + GDDy10 + meanVPDy3 + meanVPDy5 + meanVPDy7 + meanVPDy10 + totalPrecipy3 + totalPrecipy5 + totalPrecipy7 + totalPrecipy10 + meanTempy3 + meanTempy5 + meanTempy7 + meanTempy10 + freezeDaysChange + GDDChange + meanVPDChange + totalPrecipChange + meanTempChange"
+formulaString = "recovPcent5y ~ aspect_mode + elevation_mean + slope_mean + 
+                  soil0_mode + soil30_mode + soil100_mode + pH30_mean + 
+                  ecoR_code + ownership_mode + freezeDaysy3 + freezeDaysy5 + 
+                  freezeDaysy7 + freezeDaysy10 + GDDy3 + GDDy5 + GDDy7 + 
+                  GDDy10 + meanVPDy3 + meanVPDy5 + meanVPDy7 + meanVPDy10 + 
+                  totalPrecipy3 + totalPrecipy5 + totalPrecipy7 + 
+                  totalPrecipy10 + meanTempy3 + meanTempy5 + meanTempy7 +
+                  meanTempy10 + freezeDaysChange + GDDChange + meanVPDChange + 
+                  totalPrecipChange + meanTempChange + plantation_class + 
+                  soilGG_mode + SI_25 + SI_50 + Recovery_min + YearOfCut + 
+                  pre_CutMean + lat + long"
 
 # # Seperating train from test data 70% train, 30% test
 # trainIndices = sample(x = (1:length(plottingDF$UniqueID)), size = (0.7*length(plottingDF$UniqueID)))
@@ -603,30 +727,27 @@ formulaString = "K_shift ~ aspect_mode + elevation_mean + slope_mean + soil0_mod
 # testIndices = (1:length(plottingDF$UniqueID))[-trainIndices]
 # testData = plottingDF[testIndices,]
 
-# Fitting the regression tree
+# Fitting the regression CART model for K_shift
 CART_fit = rpart(formula = formulaString,
               data = plottingDF,
               method = 'anova',
-              control = rpart.control(maxdepth = 10,
-                                      minsplit = 100,
-                                      minbucket = 50,
-                                      xval = 10,
-                                      cp = 0
-                                      )
+              cp = 0
               )
+rsq.rpart(CART_fit)
 # Finding the lowest cp value within 1SE of the lowest cross validated error
 lowERRcpI = as.numeric(which.min(CART_fit$cptable[,4]))
+lowERRcp = as.numeric(CART_fit$cptable[lowERRcpI,1])
 optimumCP = which(CART_fit$cptable[,4] <= (CART_fit$cptable[lowERRcpI,4] + CART_fit$cptable[lowERRcpI,5]))
 optimumCP = as.double(CART_fit$cptable[min(optimumCP),1])
 
-CART_test = rpart.predict(CART_fit, type = 'matrix')
-
-# Going to look at the highest residuals from this model
-CARTResids = sort(abs(residuals(CART_fit)),decreasing = TRUE)
-residQs = quantile(CARTResids,c(0.80,0.85,0.90,0.95))
-Qresids = CARTResids[which(CARTResids >= residQs[4])]
-residsI = as.numeric(names(Qresids))
-residsStands = plottingDF$UniqueID[residsI]
+# CART_test = rpart.predict(CART_fit, type = 'matrix')
+# 
+# # Going to look at the highest residuals from this model
+# CARTResids = sort(abs(residuals(CART_fit)),decreasing = TRUE)
+# residQs = quantile(CARTResids,c(0.80,0.85,0.90,0.95))
+# Qresids = CARTResids[which(CARTResids >= residQs[4])]
+# residsI = as.numeric(names(Qresids))
+# residsStands = plottingDF$UniqueID[residsI]
 
 # # Testing the regression tree
 # CART_test = rpart.predict(object = CART_fit,
@@ -642,39 +763,128 @@ residsStands = plottingDF$UniqueID[residsI]
 
 # Pruning the tree to the lowest complexity parameter
 CART_fit2 = prune.rpart(CART_fit, cp = optimumCP)
-CART_test2 = rpart.predict(object = CART_fit2,
-                          type = 'matrix',
-                          newdata = testData
-)
-CART2_rmse = sqrt(mean((CART_test2 - testData$K_shift)^2))
+paste('Pruned CART R^2',round(1-min(CART_fit2$cptable[,4]),digits = 4))
+rpart.plot(CART_fit2)
+# CART_test2 = rpart.predict(object = CART_fit2,
+#                           type = 'matrix',
+#                           newdata = testData
+# )
+# CART2_rmse = sqrt(mean((CART_test2 - testData$K_shift)^2))
 
-## Plotting variable importance
-data = sort(RF_1$variable.importance, decreasing = TRUE)
-varGraph = ggplot(mapping = aes(x = names(data), y = as.numeric(data))) +
+noSIstands = which(is.na(plottingDF$SI_25))
+
+### Trying out random forest ###
+RF_1 = ranger(formula = formulaString,
+              data = plottingDF[c(-178,-3448,-2596,-noSIstands),],
+              num.trees = 2000,
+              importance = 'impurity',
+              replace = TRUE,
+              respect.unordered.factors = TRUE,
+              oob.error = TRUE,
+              num.threads = 8,
+              write.forest = TRUE
+)
+# Checking out accuracy of Random Forest
+paste("Random Forest R2",round(RF_1$r.squared, digits = 3))
+plot.default(plottingDF$recovPcent5y [c(-178,-3448,-2596,-noSIstands)],RF_1$predictions) #xlim = c(-50,200),ylim = c(-50,200)
+abline(0,1)
+
+## Plotting variable importance c(RF_1$variable.importance,CART_fit$variable.importance)
+varIdata = sqrt(sort(CART_fit2$variable.importance, decreasing = TRUE))[0:floor(0.6*length(RF_1$variable.importance))]
+varGraph = ggplot(mapping = aes(x = reorder(names(varIdata),as.numeric(varIdata)), y = as.numeric(varIdata))) +
   geom_bar(width = 1, 
            stat="identity",
            colour = "black", 
            fill="lightblue",
            position = position_dodge()
-           ) +
+           )+
+  theme(aspect.ratio = 2/3)+
   coord_polar(theta = "x", start=0)+
   labs(x = NULL,y = 'Variable Importance Metric')
 print(varGraph)
 
-### Trying out random forest ###
-RF_1 = ranger(formula = formulaString,
-              data = plottingDF[-146,],
-              num.trees = 2000,
-              importance = 'permutation',
-              max.depth = 15,
-              mtry = floor(35/3), # number of features / 3
-              replace = TRUE,
-              respect.unordered.factors = 'order',
-              oob.error = TRUE,
-              num.threads = 8,
-              write.forest = TRUE,
-              sample.fraction = 0.7
-              )
+## Plotting variable importance c(RF_1$variable.importance,CART_fit$variable.importance)
+varIdata = sqrt(sort(RF_1$variable.importance, decreasing = TRUE))[0:floor(0.6*length(RF_1$variable.importance))]
+varGraph = ggplot(mapping = aes(x = reorder(names(varIdata),as.numeric(varIdata)), y = as.numeric(varIdata),fill = as.numeric(varIdata))) +
+  geom_bar(width = 1, 
+           stat="identity",
+           colour = "black",
+           position = position_dodge()
+  )+
+  coord_flip()+
+  scale_fill_continuous(low="blue", high="red")+
+  theme(aspect.ratio = 2/3,
+        text = element_text(size = 16)
+        )+
+  guides(fill=guide_legend(title=""))+
+  labs(x = NULL,y = 'Gini Variable Importance')
+print(varGraph)
+
+# Going to try the CART model with binned K_shift rather than a continuous regression
+test = ecdf(plottingDF$K_shift)
+
+calcConfusion = function(confusionMatrix){
+  inputDim = dim(confusionMatrix)
+  accuracyTable = matrix(ncol = 3,nrow = inputDim[1])
+  colnames(accuracyTable) = c('Users','producers','overall')
+  rownames(accuracyTable) = seq(1,inputDim[1])
+  for (classN in seq(1,inputDim[1])){
+    accuracyTable[classN,1] = confusionMatrix[classN,classN] / sum(confusionMatrix[classN,])
+    accuracyTable[classN,2] = confusionMatrix[classN,classN] / sum(confusionMatrix[,classN])
+  }
+  total = sum(confusionMatrix[,c(seq(1,inputDim[1]))])
+  accuracyTable[1,3] = sum(diag(confusionMatrix)) / total
+  return(accuracyTable)
+}
+
+### trying to bin values with a given number of bins (equal number of samples per bin)
+rowOrder = data.frame(sort(plottingDF$K_shift,decreasing = FALSE,index.return = TRUE))[,2]
+plottingDF$'binKshift'[rowOrder] = ntile(sort(plottingDF$K_shift, decreasing = FALSE), n = 3)
+#plottingDF$'binKshift'[c(91,2374,3393)] = 2 # the above code misclassifies 3 values as negative
+plottingDF$'binKshift' = as.factor(plottingDF$'binKshift')
+
+### this code can be used to bin values based on quantiles
+# KshiftQs = quantile(plottingDF$K_shift,c(0.0,0.1241812,0.345,0.540,0.75,1.0), digits = 3) # this is just for < 0 OR > 0
+# binnedKshift = data.frame(findInterval(plottingDF$K_shift,KshiftQs,all.inside = TRUE))
+# plottingDF$'binKshift' = as.factor(binnedKshift$findInterval.plottingDF.K_shift..KshiftQs.)
+
+# I'm trying out removing the other soil modes (soil0_mode + soil100_mode)
+formulaString2 = "binKshift ~ aspect_mode + elevation_mean + slope_mean + 
+                  soil0_mode + soil30_mode + soil100_mode + pH30_mean + 
+                  ecoR_code + ownership_mode + freezeDaysy3 + freezeDaysy5 + 
+                  freezeDaysy7 + freezeDaysy10 + GDDy3 + GDDy5 + GDDy7 + GDDy10 + 
+                  meanVPDy3 + meanVPDy5 + meanVPDy7 + meanVPDy10 + 
+                  totalPrecipy3 + totalPrecipy5 + totalPrecipy7 + totalPrecipy10 +
+                  meanTempy3 + meanTempy5 + meanTempy7 + meanTempy10 + 
+                  freezeDaysChange + GDDChange + meanVPDChange + 
+                  totalPrecipChange + meanTempChange + plantation_class + 
+                  soilGG_mode"
+CART_fit3 = rpart(formula = formulaString2,
+                  data = plottingDF,
+                  method = 'class',
+                  cp = 0
+                  )
+paste('Pruned binned K_shift CART R^2',round(1-min(CART_fit3$cptable[,4]),digits = 4))
+CART_fit3 = prune.rpart(CART_fit3,cp = 0.00470925)
+CART_confM = table(predict(CART_fit3, type = 'class'),plottingDF$binKshift)
+print(CART_confM)
+print(calcConfusion(CART_confM))
+
+### Trying out random forest for binned K_shift ###
+RF_2 = ranger(formula = formulaString2,
+            data = plottingDF[c(-178,-3448,-2596,-noSIstands),],
+            num.trees = 2000,
+            importance = 'impurity_corrected',
+            replace = TRUE,
+            respect.unordered.factors = TRUE,
+            oob.error = TRUE,
+            num.threads = 8,
+            write.forest = TRUE,
+            classification = TRUE,
+            verbose = TRUE
+)
+print(RF_2$confusion.matrix)
+print(calcConfusion(RF_2$confusion.matrix))
 
 #### Temporal trend analysis ####
 library(Kendall)
@@ -688,12 +898,118 @@ yearsMedian = aggregate.data.frame(plottingDF$K_shift,
 trendTest = Kendall(yearsMedian$Group.1,yearsMedian$x)
 summary(trendTest)
 plot.default(yearsMedian$Group.1,yearsMedian$x)
-abline(0,0)
+temporalTrend = lm('x ~ Group.1',data = yearsMedian)
+summary(temporalTrend)
+abline(temporalTrend$coefficients)
 
+#### Looking at regional groups ####
+group1 = c(8,6,4,5,3)
+group2 = c(7,2,1)
+
+temporalVariable = 'freezeDaysy3'
+
+## Looking at temporal trend for coastal regions
+rows1 = plottingDF$groupID %in% group1
+G1data = plottingDF[rows1,]
+yearsMedianG1 = aggregate.data.frame(G1data[temporalVariable],
+                                   by = list(G1data$YearOfCut),
+                                   FUN = median,
+                                   simplify = TRUE
+)
+
+trendTestG1 = Kendall(yearsMedianG1[,1], yearsMedianG1[,2])
+summary(trendTestG1)
+g1zoo = zoo(x = yearsMedianG1[,2],
+            order.by = yearsMedianG1$Group.1
+            )
+g1ACF = acf(x = g1zoo,
+        type = 'correlation',
+        plot = TRUE
+        )
+print(g1ACF)
+plot.default(yearsMedianG1[,1], yearsMedianG1[,2], type = 'l', main = paste('Coastal Stands',temporalVariable,'Temporal Trend'))
+temporalTrendG1 = lm(paste(temporalVariable,' ~ Group.1', sep = ''),data = yearsMedianG1)
+abline(temporalTrendG1$coefficients, col = 'blue')
+
+## Looking at temporal trend for inland regions
+rows2 = plottingDF$groupID %in% group2
+G2data = plottingDF[rows2,]
+yearsMedianG2 = aggregate.data.frame(G2data[temporalVariable],
+                                     by = list(G2data$YearOfCut),
+                                     FUN = median,
+                                     simplify = TRUE
+)
+
+trendTestG2 = Kendall(yearsMedianG2[,1], yearsMedianG2[,2])
+summary(trendTestG2)
+g2zoo = zoo(x = yearsMedianG2[,2],
+            order.by = yearsMedianG1$Group.1
+)
+g2ACF = acf(x = g2zoo,
+            type = 'correlation',
+            plot = TRUE
+)
+print(g2ACF)
+plot.default(yearsMedianG2[,1], yearsMedianG2[,2], type = 'l', main = paste('In-land Piedmont Stands',temporalVariable,'Temporal Trend'))
+temporalTrendG2 = lm(paste(temporalVariable,' ~ Group.1', sep = ''),data = yearsMedianG2)
+abline(temporalTrendG2$coefficients, col = 'blue')
+
+## Plot to look at cluster temporal trends together
+combinedTrends = ggplot(mapping = aes_string(x = 'YearOfCut', y = temporalVariable, color = 'groupID'),
+                        data = plottingDF
+                        )+
+                        geom_point(shape = 4)+
+                        stat_smooth(method = 'lm')
+print(combinedTrends)
+
+## Looking at TCC values
+onlyTCCrows = which(is.na(plottingDF$TCCy10) == FALSE)
+onlyTCC_DF = plottingDF[onlyTCCrows,]
+
+onlyNumeric = unlist(lapply(onlyTCC_DF, is.numeric))  
+correlationMatrix = cor(onlyTCC_DF[,onlyNumeric], 
+                        use = 'everything'
+)
+corrplot(correlationMatrix)
+
+
+## Boxplots to describe spatial cluster
+arcmapSymb = c('#78AAFF','#FF6455','#7DDC55','#FFB400','#C864E1','#BEA064','#FABEC8','#AFAFAF')
+clusterAttri = ggplot(data = plottingDF[-104,],
+                      mapping = aes_string(y = 'pre_CutMean', fill = 'groupID')
+                      )+
+  geom_boxplot(notch = TRUE,
+               varwidth = TRUE,
+               coef = 1.0
+               )+
+  scale_fill_manual(values = arcmapSymb
+                    )+
+  theme(axis.text.x=element_blank(), #remove x axis labels
+        axis.ticks.x=element_blank()
+  )+
+  labs(xlab = '', fill = 'Cluster ID')
+print(clusterAttri)
+
+## Plot for relationship between pre-disturbance mean and relative K_shift
+Krelation = ggplot(data = plottingDF,
+                   mapping = aes_string(y = 'pre_CutMean', x = 'rel_Kshift') # color = 'groupID'
+                   )+
+  #geom_point(shape = 4, stroke = 0.967)+
+  geom_hex()+
+  theme(legend.position = 'right',
+        aspect.ratio = 2/3,
+        text = element_text(size = 16)
+  )+
+  #guides(fill=guide_legend(title="Cluster ID"))+
+  labs(x = "% Change in NBR Post-Disturbance",
+       y = 'Pre-Disturbance Mean',
+       fill = "Observation Count")
+print(Krelation)
+  
 #### new data visualization plotting methods ####
 
 # making a list of recovery metrics to plot
-metrics = c('Recovery_max','Recovery_mag','Recovery_slope','K_shift','Y2R','NonPSAy3','NonPSAy5','NonPSAy7','NonPSAy10')
+metrics = c('Recovery_max','Recovery_mag','Recovery_slope','K_shift','Y2R_seg','NonPSAy3','NonPSAy5','NonPSAy7','NonPSAy10')
 metrics = append(metrics,colnames(plottingDF)[match('recovPcent3y',colnames(plottingDF)) : match('B5y10',colnames(plottingDF))])
 metrics = append(metrics,colnames(plottingDF)[match('NBRy3',colnames(plottingDF)):match('NBRy10',colnames(plottingDF))])
 
@@ -742,45 +1058,58 @@ distWindowDF$YearOfCut = as.factor(distWindowDF$YearOfCut)
 distWindowDF$intLat =as.factor(distWindowDF$intLat)
 distWindowDF$'YearOfCutNUM' = as.numeric(distWindowDF$YearOfCut)
 
-eq <- function(x,y) {
-  m <- lm(y ~ x)
-  as.character(
-    as.expression(
-      substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2,
-                 list(a = format(coef(m)[1], digits = 4),
-                      b = format(coef(m)[2], digits = 4),
-                      r2 = format(summary(m)$r.squared, digits = 3)))
-    )
-  )
-}
+# Plotting for poster
+yearsMedian = aggregate.data.frame(distWindowDF$K_shift,
+                                   by = list(as.numeric(distWindowDF$YearOfCut)),
+                                   FUN = median,
+                                   simplify = TRUE
+)
+
+trendTest = Kendall(yearsMedian$Group.1,yearsMedian$x)
+summary(trendTest)
+plot.default(yearsMedian$Group.1,yearsMedian$x)
+temporalTrend = lm('x ~ Group.1',data = yearsMedian)
+summary(temporalTrend)
+abline(temporalTrend$coefficients)
+
+distWindowDF$YearOfCut = as.factor(distWindowDF$YearOfCut)
 
 for (aMetric in metrics){
   
-  columnIndex = which(colnames(distWindowDF) == aMetric)
-    
+  # columnIndex = which(colnames(distWindowDF) == aMetric)
+  # linearModel = lm(paste(aMetric,"~ as.numeric.distWindowDF.YearOfCut.", sep = ""),data = data.frame(as.numeric(distWindowDF$YearOfCut),distWindowDF[aMetric]))
+  
   yearsPlot = ggplot(data = distWindowDF, 
-                     aes_string(x = 'YearOfCut', y = aMetric,group = 1) #color = 'lat'
+                     aes_string(x = 'YearOfCut', y = aMetric) #, color = 'groupID' ,group = 1
                      )+
-    #geom_bin_2d(drop = FALSE)+
-    geom_point(size = 2.5, shape = 4)+
-    stat_smooth(size = 1.5,
+    geom_bin2d()+
+    scale_fill_gradient(low = , high = )+
+    #geom_point(mapping = aes(fill = 'Stand Value', shape = "Stand Value"), size = 2.5, stroke = 0.5)+
+    stat_summary(fun = median, geom ="point", size = 5, color = 'red')+
+    stat_smooth(mapping = aes_string(x = 'YearOfCutNUM', y = aMetric),
+                size = 1.5,
                 method = 'lm',
                 se = TRUE,
                 n = 5,
-                show.legend = FALSE)+
-    labs(title = paste("Variation in",aMetric,"by Disturbance Year")
+                show.legend = TRUE,
+                color = 'yellow',
+                linetype = 'solid'
+                )+
+    labs(title = paste("Variation in",aMetric,"by Disturbance Year"),
+         xlab = "Year of Disturbance",
+         fill = "Observation Count"
          )+
-    xlab("Year of Disturbance")+
-    theme(axis.text.x = element_text(angle = 45,vjust = 0.95,hjust = 0.9), aspect.ratio = 4/8
-    )+
-    scale_colour_gradient(low = "#ffffcc",
-                          high = "#253494",
-                          space = "Lab",
-                          guide = "colourbar",
-                          aesthetics = c("colour","fill")
-    ) 
+    theme(axis.text.x = element_text(angle = 45,vjust = 0.95,hjust = 0.9), 
+          aspect.ratio = 4/8,
+          legend.position = 'right'
+    )
+    #scale_color_brewer(type = 'qual', palette = 'Set2')
     #geom_text(mapping = aes(x = 15,y = ),label = eq(distWindowDF$'YearOfCutNUM',distWindowDF[,columnIndex]), parse = TRUE)
-
+    # scale_fill_manual(name = "", values = c("Stand Value" = "black", "Yearly_Median" = 'red'))+
+    # scale_color_manual(name = "", values = c('Stand Value' = 'black', "Temporal_Trend" = 'blue'))+
+    # scale_shape_manual(name = "", values = c("Stand Value" = 4, "Yearly_Median" = 21))+
+    # scale_linetype_manual(name = "", values = c("Temporal_Trend" = 1))
+    #guides(shape = guide_legend(override.aes = list(linetype = 1)))
     print(yearsPlot)
     ggsave(filename = paste(aMetric,'_temporalTrend.svg',sep = ''),
            plot = yearsPlot,
@@ -840,13 +1169,6 @@ kshiftSoil = ggplot(data = soilDF,
   theme(axis.text.x = element_text(angle = 20,vjust = 0.95,hjust = 0.9)
   )
 print(kshiftSoil)
-
-# a function that will make it easier to look up stands in google earth
-
-GE_coords = function(standID) {
-  attributeEntry = ecoRegionInfo[which(ecoRegionInfo$UniqueID == standID),]
-  cat("Stand #",standID," : ",attributeEntry$lat,", ",attributeEntry$long, sep = "")
-}
 
 write.csv(plottingDF,file = "AllCleanedData_output.csv")
 
