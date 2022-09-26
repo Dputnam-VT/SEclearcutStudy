@@ -1,23 +1,23 @@
 #---------------------------COLLECTION 2 INVESTIGATION -------------------------
-setwd("C:/R_workspace")
+setwd("C:/R_workspace/Collection2_data")
 library(DBEST)
 library(zoo)
 library(lubridate)
 library(tidyverse)
 library(RColorBrewer)
 
-dataDate1 = "2022_06_30" # using for the latest version of the time series csv
+dataDate1 = "2022_09_23" # using for the latest version of the time series csv
 dataDate2 = "2022_08_12" # using for the latest version of the stand attribute dataset
 dataDate3 = "2022_08_04" # using for the latest version of the climate variables csv
 
 # Bringing in vegetation index time series
-inputDF = read.csv(paste("NBR_timeSeriesDF2000_",dataDate1,".csv",sep = ""),header = TRUE)
+inputDF = read.csv(paste("NBR_timeSeries_",dataDate1,".csv",sep = ""),header = TRUE)
 TS_DF = inputDF[order(inputDF$X),]
 
-EVI2_DF = read.csv(paste("EVI2_timeSeriesDF2000_",dataDate1,".csv",sep = ""),header = TRUE)
+EVI2_DF = read.csv(paste("EVI2_timeSeries_",dataDate1,".csv",sep = ""),header = TRUE)
 EVI2_DF = EVI2_DF[order(EVI2_DF$X),]
 
-B5_DF = read.csv(paste("B5_timeSeriesDF2000_",dataDate1,".csv",sep = ""),header = TRUE)
+B5_DF = read.csv(paste("SR_B5_timeSeries_",dataDate1,".csv",sep = ""),header = TRUE)
 B5_DF = B5_DF[order(B5_DF$X),]
 
 TCC_DF = read.csv("AllCleanedData_ONLYtcc.csv",header = TRUE)
@@ -194,7 +194,7 @@ span = VImax - VImin
 ## Function to plot the DBEST output correctly
 plot_DBEST = function(DBEST_object,index,metricDF,auxDF,minVIval) {
   # getting output device set up
-  svg(filename = paste('C:/R_workspace/images/ClearCutPlotsOnly/plot_',index,'_TimeSeriesGraph.svg',sep = ''),
+  svg(filename = paste('C:/R_workspace/Collection2_data/images/plot_',index,'_TimeSeriesGraph.svg',sep = ''),
       width = 4,
       height = 2,
       pointsize = 4,
@@ -593,20 +593,19 @@ for (index in goodDataDF$UniqueID){
   }
 }
 
-#### the above code is a much simplier and more transparent way of selecting the good stands
-# for (ID in goodDataDF$UniqueID) {
-#   gapLength = auxSegData$gainLossGap[which(auxSegData$UniqueID == ID)]
-#   distDuration = as.numeric(auxSegData$DistDuration[which(auxSegData$UniqueID == ID)])
-#   recovDuration = goodDataDF$Y2R[goodDataDF$UniqueID == ID]
-#   if ((distDuration > 3) | (recovDuration < 5)) {
-#     indexValue = which(goodDataDF$UniqueID == ID)
-#     goodDataDF = goodDataDF[-indexValue,]
-#   }
-# } # removing stands with large gaps between disturbance end and recovery start
+# final printing of sources of removed stands from statistics
+cat("Total Number of Bad time series :", length(badStands2),"\n", 
+    "Unusable segmentation filter :", length(areNAindicies),"\n",
+    "Disturbance segment > 3 years :", length(longDistStands),"\n",
+    "Recovery segment <= 2 years :",length(shortRecovStands), "\n",
+    "Disturbance magnitude < 0.20 :",length(smalldist),"\n",
+    "Pre-disturbance mean < 0.20 :",length(hardwoodCNV),"\n",
+    "Good time series fit RMSE :", mean(goodDataDF$fit_RMSE)
+)
 
 # # Copying only the good files into a seperate directory within all the plot images folder
-# allPlotsDirPath = "C:/R_workspace/images/ClearCutPlotsOnly"
-# goodDirPath = "C:/R_workspace/images/ClearCutPlotsOnly/CleanedData"
+# allPlotsDirPath = "C:/R_workspace/Collection2_data/images"
+# goodDirPath = "C:/R_workspace/Collection2_data/images/GoodStands"
 # for (standI in goodDataDF$UniqueID){
 #   filePath = paste('plot_',standI,'_TimeSeriesGraph.svg',sep = '')
 #   file.copy(from = paste(allPlotsDirPath,'/',filePath, sep = ''),
@@ -617,9 +616,9 @@ for (index in goodDataDF$UniqueID){
 #             copy.date = TRUE
 #         )
 # }
-# 
+
 # # Copying only the bad stands graphs into a seperate directory within all the plot images folder
-# badDirPath = "C:/R_workspace/images/ClearCutPlotsOnly/BadStands"
+# badDirPath = "C:/R_workspace/Collection2_data/images/BadStands"
 # for (standI in badStands2){
 #   filePath = paste('plot_',as.character(standI),'_TimeSeriesGraph.svg',sep = '')
 #   file.copy(from = paste(allPlotsDirPath,'/',filePath, sep = ''),
@@ -629,6 +628,19 @@ for (index in goodDataDF$UniqueID){
 #             copy.mode = TRUE,
 #             copy.date = TRUE
 #   )
+# }
+
+# # simple iteration for randomly pulling up stand images for validation of samples
+# randomSampleN = 10
+# for (i in seq(1,randomSampleN)){
+#   randomStand = sample(goodDataDF$UniqueID,1,replace = FALSE)
+#   shell(paste("C:/R_workspace/Collection2_data/images/GoodStands/",
+#               'plot_',
+#               randomStand,
+#               '_TimeSeriesGraph.svg',
+#               sep = ''),
+#         wait = FALSE
+#         )
 # }
 
 # merging the ecoregion info and good data for plotting #
@@ -776,7 +788,7 @@ noSIstands = which(is.na(plottingDF$SI_25))
 
 ### Trying out random forest ###
 RF_1 = ranger(formula = formulaString,
-              data = plottingDF[c(-178,-3448,-2596,-noSIstands),],
+              data = plottingDF[c(-174,-3434,-2582,-noSIstands),],
               num.trees = 2000,
               importance = 'impurity',
               replace = TRUE,
@@ -890,7 +902,7 @@ print(calcConfusion(RF_2$confusion.matrix))
 #### Temporal trend analysis ####
 library(Kendall)
 
-yearsMedian = aggregate.data.frame(plottingDF$K_shift,
+yearsMedian = aggregate.data.frame(plottingDF$NBRy5,
                                    by = list(plottingDF$YearOfCut),
                                    FUN = median,
                                    simplify = TRUE
@@ -1015,7 +1027,7 @@ metrics = append(metrics,colnames(plottingDF)[match('recovPcent3y',colnames(plot
 metrics = append(metrics,colnames(plottingDF)[match('NBRy3',colnames(plottingDF)):match('NBRy10',colnames(plottingDF))])
 
 # path for export of stats plots
-statsPlotsPath = "C:/R_workspace/images/StatsPlots"
+statsPlotsPath = "C:/R_workspace/Collection2_data/StatsPlots"
 
 #---------------- Ungrouped Stats plots for each metric ----------------------#
 # histograms
@@ -1172,13 +1184,3 @@ kshiftSoil = ggplot(data = soilDF,
 print(kshiftSoil)
 
 write.csv(plottingDF,file = "AllCleanedData_output.csv")
-
-# final printing of sources of removed stands from statistics
-totalNumberOfBadDataPoints = length(bigGapIndices) + length(areNAindicies) + length(longDistStands) + length(shortRecovStands)
-cat("Total Number of Bad time series :", length(badStands),"\n", 
-    "Unusable segmentation filter :", length(areNAindicies),"\n",
-    "Disturbance segment > 3 years :", length(bigGapIndices),"\n",
-    "Recovery segment <= 2 years :",length(shortRecovStands), "\n",
-    "Disturbance -> recovery gap > 3 years :",length(bigGapIndices),"\n",
-    "Good time series fit RMSE :", mean(plottingDF$fit_RMSE)
-    )
